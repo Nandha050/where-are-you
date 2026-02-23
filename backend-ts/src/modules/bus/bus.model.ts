@@ -3,8 +3,8 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface IBus extends Document {
     organizationId: mongoose.Types.ObjectId;
     numberPlate: string;
-    driverId: mongoose.Types.ObjectId;
-    routeId: mongoose.Types.ObjectId;
+    driverId?: mongoose.Types.ObjectId | null;
+    routeId?: mongoose.Types.ObjectId;
     status: 'active' | 'inactive';
     currentLat: number;
     currentLng: number;
