@@ -9,6 +9,6 @@ app.use(express.json());
 
 connectDB().then(() => {
     app.listen(ENV.PORT, () => {
-        logger.info(`Server is running on port ${ENV.PORT}`);
+        logger.info(`Server is running on port http://localhost${ENV.PORT}`);
     });
 });
