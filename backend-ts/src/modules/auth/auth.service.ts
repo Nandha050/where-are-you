@@ -4,7 +4,7 @@ import { Organization } from '../organization/organization.model';
 import { User } from '../user/user.model';
 import { ROLES } from '../../constants/roles';
 import { comparePassword } from '../../utils/comparePassword';
-import { generateToken } from '../../utils/generateToken';
+import { generateTokens } from '../../utils/generateTokens';
 import { hashPassword } from '../../utils/hashPassword';
 
 interface AdminSignupInput {
@@ -78,14 +78,15 @@ export const authService = {
 			passwordHash,
 		});
 
-		const token = generateToken({
+		const { accessToken, refreshToken } = generateTokens({
 			sub: String(admin._id),
 			organizationId: String(admin.organizationId),
 			role: ROLES.ADMIN,
 		});
 
 		return {
-			token,
+			accessToken,
+			refreshToken,
 			admin: {
 				id: String(admin._id),
 				name: admin.name,
@@ -118,14 +119,15 @@ export const authService = {
 			throw new Error('Organization not found for admin');
 		}
 
-		const token = generateToken({
+		const { accessToken, refreshToken } = generateTokens({
 			sub: String(admin._id),
 			organizationId: String(admin.organizationId),
 			role: ROLES.ADMIN,
 		});
 
 		return {
-			token,
+			accessToken,
+			refreshToken,
 			admin: {
 				id: String(admin._id),
 				name: admin.name,
@@ -157,12 +159,15 @@ export const authService = {
 					throw new Error('Invalid credentials');
 				}
 
+				const { accessToken, refreshToken } = generateTokens({
+					sub: String(user._id),
+					organizationId: String(user.organizationId),
+					role: ROLES.USER,
+				});
+
 				return {
-					token: generateToken({
-						sub: String(user._id),
-						organizationId: String(user.organizationId),
-						role: ROLES.USER,
-					}),
+					accessToken,
+					refreshToken,
 					member: {
 						id: String(user._id),
 						role: ROLES.USER,
@@ -189,12 +194,15 @@ export const authService = {
 				throw new Error('Invalid credentials');
 			}
 
+			const { accessToken, refreshToken } = generateTokens({
+				sub: String(user._id),
+				organizationId: String(user.organizationId),
+				role: ROLES.USER,
+			});
+
 			return {
-				token: generateToken({
-					sub: String(user._id),
-					organizationId: String(user.organizationId),
-					role: ROLES.USER,
-				}),
+				accessToken,
+				refreshToken,
 				member: {
 					id: String(user._id),
 					role: ROLES.USER,
@@ -220,12 +228,15 @@ export const authService = {
 				throw new Error('Invalid credentials');
 			}
 
+			const { accessToken, refreshToken } = generateTokens({
+				sub: String(driver._id),
+				organizationId: String(driver.organizationId),
+				role: ROLES.DRIVER,
+			});
+
 			return {
-				token: generateToken({
-					sub: String(driver._id),
-					organizationId: String(driver.organizationId),
-					role: ROLES.DRIVER,
-				}),
+				accessToken,
+				refreshToken,
 				member: {
 					id: String(driver._id),
 					role: ROLES.DRIVER,
@@ -252,12 +263,15 @@ export const authService = {
 			throw new Error('Invalid credentials');
 		}
 
+		const { accessToken, refreshToken } = generateTokens({
+			sub: String(driver._id),
+			organizationId: String(driver.organizationId),
+			role: ROLES.DRIVER,
+		});
+
 		return {
-			token: generateToken({
-				sub: String(driver._id),
-				organizationId: String(driver.organizationId),
-				role: ROLES.DRIVER,
-			}),
+			accessToken,
+			refreshToken,
 			member: {
 				id: String(driver._id),
 				role: ROLES.DRIVER,

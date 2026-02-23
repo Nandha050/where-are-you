@@ -12,21 +12,27 @@ declare global {
 }
 
 export const requireAuth = (req: Request, res: Response, next: NextFunction): void => {
-	const authorization = req.headers.authorization;
+    // Try to get token from cookie first, then fall back to Authorization header
+    let token = req.cookies?.accessToken;
 
-	if (!authorization?.startsWith('Bearer ')) {
-		res.status(401).json({ message: 'Missing or invalid authorization token' });
-		return;
-	}
+    if (!token) {
+        const authorization = req.headers.authorization;
+        if (authorization?.startsWith('Bearer ')) {
+            token = authorization.replace('Bearer ', '').trim();
+        }
+    }
 
-	const token = authorization.replace('Bearer ', '').trim();
+    if (!token) {
+        res.status(401).json({ message: 'Missing or invalid authorization token' });
+        return;
+    }
 
-	try {
-		const decoded = jwt.verify(token, JWT_CONFIG.SECRET) as AuthenticatedRequestUser;
-		req.user = decoded;
-		next();
-	} catch (_error) {
-		res.status(401).json({ message: 'Invalid or expired token' });
-	}
+    try {
+        const decoded = jwt.verify(token, JWT_CONFIG.SECRET) as AuthenticatedRequestUser;
+        req.user = decoded;
+        next();
+    } catch (_error) {
+        res.status(401).json({ message: 'Invalid or expired token' });
+    }
 };
 

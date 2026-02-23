@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from './auth.service';
+import { setAuthCookies } from '../../utils/cookies';
 import { SignupAdminInput, LoginAdminInput, LoginMemberInput, CreateMemberInput } from './auth.validation';
 
 const getMessage = (error: unknown): string => {
@@ -16,7 +17,14 @@ export const authController = {
 
 			const data = await authService.signupAdmin({ name, organizationName, email, password });
 
-			res.status(201).json(data);
+			// Set HTTP-only cookies
+			setAuthCookies(res, data.accessToken, data.refreshToken);
+
+			res.status(201).json({
+				admin: data.admin,
+				accessToken: data.accessToken,
+				refreshToken: data.refreshToken,
+			});
 		} catch (error) {
 			res.status(400).json({ message: getMessage(error) });
 		}
@@ -28,7 +36,14 @@ export const authController = {
 
 			const data = await authService.loginAdmin({ email, password });
 
-			res.status(200).json(data);
+			// Set HTTP-only cookies
+			setAuthCookies(res, data.accessToken, data.refreshToken);
+
+			res.status(200).json({
+				admin: data.admin,
+				accessToken: data.accessToken,
+				refreshToken: data.refreshToken,
+			});
 		} catch (error) {
 			res.status(401).json({ message: getMessage(error) });
 		}
@@ -40,7 +55,14 @@ export const authController = {
 
 			const data = await authService.loginMember({ role, memberId, password, organizationSlug });
 
-			res.status(200).json(data);
+			// Set HTTP-only cookies
+			setAuthCookies(res, data.accessToken, data.refreshToken);
+
+			res.status(200).json({
+				member: data.member,
+				accessToken: data.accessToken,
+				refreshToken: data.refreshToken,
+			});
 		} catch (error) {
 			res.status(401).json({ message: getMessage(error) });
 		}

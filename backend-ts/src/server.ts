@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import cookieParser from 'cookie-parser';
 import { connectDB } from './config/db.config';
 import { ENV } from './config/env.config';
 import { logger } from './utils/logger';
@@ -12,6 +13,7 @@ import { userRouter } from './modules/user/user.routes';
 const app = express();
 
 app.use(express.json());
+app.use(cookieParser());
 app.get('/', (_req, res) => {
     res.status(200).json({ message: 'Where Are You backend is running' });
 });

@@ -4,6 +4,8 @@ import { requireRole } from '../../middleware/role.middleware';
 import { validate } from '../../middleware/validate.middleware';
 import { ROLES } from '../../constants/roles';
 import { authController } from './auth.controller';
+import { refreshTokenController, logoutController } from './auth.token.controller';
+import { authDebugController } from './auth.debug.controller';
 import { signupAdminSchema, loginAdminSchema, loginMemberSchema, createMemberSchema } from './auth.validation';
 
 export const authRouter = Router();
@@ -12,7 +14,15 @@ authRouter.post('/admin/signup', validate(signupAdminSchema), authController.sig
 authRouter.post('/admin/login', validate(loginAdminSchema), authController.loginAdmin);
 authRouter.post('/member/login', validate(loginMemberSchema), authController.loginMember);
 
+// Token management
+authRouter.post('/refresh', refreshTokenController);
+authRouter.post('/logout', logoutController);
+
+// Debug route - check your token
+authRouter.get('/whoami', requireAuth, authDebugController.whoami);
+
 authRouter.post('/admin/users', requireAuth, requireRole(ROLES.ADMIN), validate(createMemberSchema), authController.createUserByAdmin);
 authRouter.post('/admin/drivers', requireAuth, requireRole(ROLES.ADMIN), validate(createMemberSchema), authController.createDriverByAdmin);
+
 
 
