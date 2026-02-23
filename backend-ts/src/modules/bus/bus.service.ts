@@ -1,5 +1,6 @@
 import { Bus } from './bus.model';
 import { Driver } from '../driver/driver.model';
+import { Route } from '../route/route.model';
 import { CreateBusInput } from './bus.validation';
 
 export const busService = {
@@ -41,10 +42,10 @@ export const busService = {
                 numberPlate: bus.numberPlate,
                 driver: driverId
                     ? {
-                          id: String(driverId._id || driverId),
-                          name: driverId.name || '',
-                          employeeId: driverId.employeeId || '',
-                      }
+                        id: String(driverId._id || driverId),
+                        name: driverId.name || '',
+                        employeeId: driverId.employeeId || '',
+                    }
                     : null,
                 status: bus.status,
                 currentLat: bus.currentLat,
@@ -70,10 +71,10 @@ export const busService = {
             numberPlate: bus.numberPlate,
             driver: driverId
                 ? {
-                      id: String(driverId._id || driverId),
-                      name: driverId.name || '',
-                      employeeId: driverId.employeeId || '',
-                  }
+                    id: String(driverId._id || driverId),
+                    name: driverId.name || '',
+                    employeeId: driverId.employeeId || '',
+                }
                 : null,
             status: bus.status,
             currentLat: bus.currentLat,
@@ -124,5 +125,28 @@ export const busService = {
         }
 
         return { message: 'Bus deleted successfully' };
+    },
+
+    updateRouteForBus: async (organizationId: string, busId: string, routeId: string) => {
+        const bus = await Bus.findOne({ _id: busId, organizationId });
+        if (!bus) {
+            throw new Error('Bus not found');
+        }
+
+        const route = await Route.findOne({ _id: routeId, organizationId });
+        if (!route) {
+            throw new Error('Route not found');
+        }
+
+        bus.routeId = routeId as any;
+        await bus.save();
+
+        return {
+            id: String(bus._id),
+            numberPlate: bus.numberPlate,
+            routeId: String(bus.routeId),
+            status: bus.status,
+            trackingStatus: bus.trackingStatus,
+        };
     },
 };

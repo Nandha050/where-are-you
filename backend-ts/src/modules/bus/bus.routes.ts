@@ -11,4 +11,5 @@ busRouter.post('/', requireAuth, requireRole(ROLES.ADMIN), busController.createB
 busRouter.get('/', requireAuth, requireRole(ROLES.ADMIN), busController.getBuses);
 busRouter.get('/:busId', requireAuth, requireRole(ROLES.ADMIN), busController.getBusById);
 busRouter.put('/:busId/driver', requireAuth, requireRole(ROLES.ADMIN), busController.updateBusDriver);
+busRouter.put('/:busId/route', requireAuth, requireRole(ROLES.ADMIN), busController.updateBusRoute);
 busRouter.delete('/:busId', requireAuth, requireRole(ROLES.ADMIN), busController.deleteBus);

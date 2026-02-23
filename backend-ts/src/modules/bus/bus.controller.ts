@@ -115,4 +115,33 @@ export const busController = {
             });
         }
     },
+
+    updateBusRoute: async (req: Request, res: Response): Promise<void> => {
+        try {
+            if (!req.user?.organizationId) {
+                res.status(401).json({ message: 'Unauthorized' });
+                return;
+            }
+
+            const { busId } = req.params as { busId: string };
+            const { routeId } = req.body as { routeId?: string };
+
+            if (!routeId || routeId.trim().length === 0) {
+                res.status(400).json({ message: 'routeId is required' });
+                return;
+            }
+
+            const bus = await busService.updateRouteForBus(
+                req.user.organizationId,
+                busId,
+                routeId.trim()
+            );
+
+            res.status(200).json({ bus });
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Something went wrong';
+            const status = msg === 'Bus not found' || msg === 'Route not found' ? 404 : 400;
+            res.status(status).json({ message: msg });
+        }
+    },
 };
