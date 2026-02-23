@@ -6,6 +6,7 @@ import { authRouter } from './modules/auth/auth.routes';
 import { busRouter } from './modules/bus/bus.routes';
 import { driverRouter } from './modules/driver/driver.routes';
 import { routeRouter } from './modules/route/route.routes';
+import { stopRouter } from './modules/stop/stop.routes';
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/buses', busRouter);
 app.use('/api/driver', driverRouter);
 app.use('/api/admin/routes', routeRouter);
+app.use('/api/admin', stopRouter);
 
 connectDB().then(() => {
     app.listen(ENV.PORT, () => {
