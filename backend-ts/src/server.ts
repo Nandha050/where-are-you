@@ -7,6 +7,7 @@ import { busRouter } from './modules/bus/bus.routes';
 import { driverRouter } from './modules/driver/driver.routes';
 import { routeRouter } from './modules/route/route.routes';
 import { stopRouter } from './modules/stop/stop.routes';
+import { userRouter } from './modules/user/user.routes';
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use('/api/buses', busRouter);
 app.use('/api/driver', driverRouter);
 app.use('/api/admin/routes', routeRouter);
 app.use('/api/admin', stopRouter);
+app.use('/api/admin/users', userRouter);
 
 connectDB().then(() => {
     app.listen(ENV.PORT, () => {
