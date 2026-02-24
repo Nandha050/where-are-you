@@ -80,14 +80,14 @@ export const busController = {
             }
 
             const { busId } = req.params as { busId: string };
-            const { driverId } = req.body as { driverId?: string };
+            const { memberId } = req.body as { memberId?: string };
 
-            if (!driverId || driverId.trim().length === 0) {
-                res.status(400).json({ message: 'driverId is required' });
+            if (!memberId || memberId.trim().length === 0) {
+                res.status(400).json({ message: 'memberId is required' });
                 return;
             }
 
-            const bus = await busService.updateBusDriver(req.user.organizationId, busId, driverId.trim());
+            const bus = await busService.updateBusDriver(req.user.organizationId, busId, memberId.trim());
 
             res.status(200).json({ bus });
         } catch (error) {
@@ -124,23 +124,23 @@ export const busController = {
             }
 
             const { busId } = req.params as { busId: string };
-            const { routeId } = req.body as { routeId?: string };
+            const { routeName } = req.body as { routeName?: string };
 
-            if (!routeId || routeId.trim().length === 0) {
-                res.status(400).json({ message: 'routeId is required' });
+            if (!routeName || routeName.trim().length === 0) {
+                res.status(400).json({ message: 'routeName is required' });
                 return;
             }
 
             const bus = await busService.updateRouteForBus(
                 req.user.organizationId,
                 busId,
-                routeId.trim()
+                routeName.trim()
             );
 
             res.status(200).json({ bus });
         } catch (error) {
             const msg = error instanceof Error ? error.message : 'Something went wrong';
-            const status = msg === 'Bus not found' || msg === 'Route not found' ? 404 : 400;
+            const status = msg === 'Bus not found' || msg.includes('Route') ? 404 : 400;
             res.status(status).json({ message: msg });
         }
     },

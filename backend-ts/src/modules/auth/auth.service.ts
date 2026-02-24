@@ -221,7 +221,7 @@ export const authService = {
 
 			const driver = await Driver.findOne({
 				organizationId: organization._id,
-				employeeId: input.memberId,
+				memberId: input.memberId,
 			});
 
 			if (!driver || !(await comparePassword(input.password, driver.passwordHash))) {
@@ -241,12 +241,12 @@ export const authService = {
 					id: String(driver._id),
 					role: ROLES.DRIVER,
 					name: driver.name,
-					memberId: driver.employeeId,
+					memberId: driver.memberId,
 				},
 			};
 		}
 
-		const drivers = await Driver.find({ employeeId: input.memberId }).limit(2);
+		const drivers = await Driver.find({ memberId: input.memberId }).limit(2);
 
 		if (drivers.length === 0) {
 			throw new Error('Invalid credentials');
@@ -276,7 +276,7 @@ export const authService = {
 				id: String(driver._id),
 				role: ROLES.DRIVER,
 				name: driver.name,
-				memberId: driver.employeeId,
+				memberId: driver.memberId,
 			},
 		};
 	},
@@ -308,7 +308,7 @@ export const authService = {
 	createDriverByAdmin: async (organizationId: string, input: CreateMemberInput) => {
 		const existingDriver = await Driver.findOne({
 			organizationId,
-			employeeId: input.memberId,
+			memberId: input.memberId,
 		});
 
 		if (existingDriver) {
@@ -318,14 +318,14 @@ export const authService = {
 		const driver = await Driver.create({
 			organizationId,
 			name: input.name.trim(),
-			employeeId: input.memberId.trim(),
+			memberId: input.memberId.trim(),
 			passwordHash: await hashPassword(input.password),
 		});
 
 		return {
 			id: String(driver._id),
 			name: driver.name,
-			memberId: driver.employeeId,
+			memberId: driver.memberId,
 		};
 	},
 };

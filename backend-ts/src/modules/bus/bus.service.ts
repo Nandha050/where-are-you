@@ -33,7 +33,7 @@ export const busService = {
     },
 
     getBusesByOrganization: async (organizationId: string) => {
-        const buses = await Bus.find({ organizationId }).populate('driverId', 'name employeeId');
+        const buses = await Bus.find({ organizationId }).populate('driverId', 'name memberId');
 
         return buses.map((bus) => {
             const driverId = bus.driverId as any;
@@ -44,7 +44,7 @@ export const busService = {
                     ? {
                         id: String(driverId._id || driverId),
                         name: driverId.name || '',
-                        employeeId: driverId.employeeId || '',
+                        memberId: driverId.memberId || '',
                     }
                     : null,
                 status: bus.status,
@@ -59,7 +59,7 @@ export const busService = {
         const bus = await Bus.findOne({
             _id: busId,
             organizationId,
-        }).populate('driverId', 'name employeeId');
+        }).populate('driverId', 'name memberId');
 
         if (!bus) {
             throw new Error('Bus not found');
@@ -73,7 +73,7 @@ export const busService = {
                 ? {
                     id: String(driverId._id || driverId),
                     name: driverId.name || '',
-                    employeeId: driverId.employeeId || '',
+                    memberId: driverId.memberId || '',
                 }
                 : null,
             status: bus.status,
@@ -83,7 +83,7 @@ export const busService = {
         };
     },
 
-    updateBusDriver: async (organizationId: string, busId: string, driverId: string) => {
+    updateBusDriver: async (organizationId: string, busId: string, memberId: string) => {
         const bus = await Bus.findOne({
             _id: busId,
             organizationId,
@@ -93,23 +93,33 @@ export const busService = {
             throw new Error('Bus not found');
         }
 
+        // Find driver by memberId
+        const driver = await Driver.findOne({
+            organizationId,
+            memberId: memberId,
+        });
+
+        if (!driver) {
+            throw new Error(`Driver with memberId '${memberId}' not found`);
+        }
+
         // Remove previous driver from this bus
         if (bus.driverId) {
             await Driver.findByIdAndUpdate(bus.driverId, { assignedBusId: null });
         }
 
-        bus.driverId = (driverId || null) as any;
+        bus.driverId = driver._id as any;
         await bus.save();
 
         // Update new driver with assigned bus
-        if (driverId) {
-            await Driver.findByIdAndUpdate(driverId, { assignedBusId: busId });
-        }
+        await Driver.findByIdAndUpdate(driver._id, { assignedBusId: busId });
 
         return {
             id: String(bus._id),
             numberPlate: bus.numberPlate,
-            driverId: bus.driverId ? String(bus.driverId) : null,
+            driverId: String(driver._id),
+            driverMemberId: driver.memberId,
+            driverName: driver.name,
             status: bus.status,
         };
     },
@@ -127,24 +137,25 @@ export const busService = {
         return { message: 'Bus deleted successfully' };
     },
 
-    updateRouteForBus: async (organizationId: string, busId: string, routeId: string) => {
+    updateRouteForBus: async (organizationId: string, busId: string, routeName: string) => {
         const bus = await Bus.findOne({ _id: busId, organizationId });
         if (!bus) {
             throw new Error('Bus not found');
         }
 
-        const route = await Route.findOne({ _id: routeId, organizationId });
+        const route = await Route.findOne({ organizationId, name: routeName });
         if (!route) {
-            throw new Error('Route not found');
+            throw new Error(`Route with name '${routeName}' not found`);
         }
 
-        bus.routeId = routeId as any;
+        bus.routeId = route._id as any;
         await bus.save();
 
         return {
             id: String(bus._id),
             numberPlate: bus.numberPlate,
-            routeId: String(bus.routeId),
+            routeId: String(route._id),
+            routeName: route.name,
             status: bus.status,
             trackingStatus: bus.trackingStatus,
         };

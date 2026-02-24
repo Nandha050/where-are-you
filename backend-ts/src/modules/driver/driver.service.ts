@@ -14,7 +14,7 @@ export const driverService = {
         return {
             id: String(driver._id),
             name: driver.name,
-            employeeId: driver.employeeId,
+            memberId: driver.memberId,
             organizationId: String(driver.organizationId),
             assignedBus: assignedBus
                 ? {
@@ -63,7 +63,7 @@ export const driverService = {
         return {
             id: String(driver._id),
             name: driver.name,
-            employeeId: driver.employeeId,
+            memberId: driver.memberId,
             assignedBus: assignedBus
                 ? {
                       id: String(assignedBus._id),
