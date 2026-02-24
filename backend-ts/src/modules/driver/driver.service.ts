@@ -2,6 +2,17 @@ import { Driver } from './driver.model';
 import { Bus } from '../bus/bus.model';
 
 export const driverService = {
+    listDriversByOrganization: async (organizationId: string) => {
+        const drivers = await Driver.find({ organizationId })
+            .select('_id name memberId')
+            .sort({ name: 1 });
+
+        return drivers.map((driver) => ({
+            id: String(driver._id),
+            name: driver.name,
+            memberId: driver.memberId,
+        }));
+    },
     getMyDetails: async (driverId: string) => {
         const driver = await Driver.findById(driverId).populate('assignedBusId', 'numberPlate status currentLat currentLng');
 

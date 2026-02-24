@@ -9,6 +9,20 @@ const getMessage = (error: unknown): string => {
 };
 
 export const driverController = {
+    listDrivers: async (req: Request, res: Response): Promise<void> => {
+        try {
+            if (!req.user?.organizationId) {
+                res.status(401).json({ message: 'Unauthorized' });
+                return;
+            }
+
+            const drivers = await driverService.listDriversByOrganization(req.user.organizationId);
+
+            res.status(200).json({ drivers });
+        } catch (error) {
+            res.status(400).json({ message: getMessage(error) });
+        }
+    },
     getMyDetails: async (req: Request, res: Response): Promise<void> => {
         try {
             if (!req.user?.sub) {

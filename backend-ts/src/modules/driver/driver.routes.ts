@@ -6,6 +6,9 @@ import { driverController } from './driver.controller';
 
 export const driverRouter = Router();
 
+// Admin routes
+driverRouter.get('/admin/all', requireAuth, requireRole(ROLES.ADMIN), driverController.listDrivers);
+
 // Driver routes (driver-only)
 driverRouter.get('/me', requireAuth, requireRole(ROLES.DRIVER), driverController.getMyDetails);
 driverRouter.get('/my-bus', requireAuth, requireRole(ROLES.DRIVER), driverController.getMyBus);
