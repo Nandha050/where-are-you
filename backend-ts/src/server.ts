@@ -10,7 +10,14 @@ import { routeRouter } from './modules/route/route.routes';
 import { stopRouter } from './modules/stop/stop.routes';
 import { userRouter } from './modules/user/user.routes';
 
+
+import cors from 'cors';
 const app = express();
+// Add CORS middleware with configuration
+app.use(cors({
+    origin: process.env.FRONTEND_URL, // Allow requests from the frontend URL
+    credentials: true, // Include credentials (cookies, authorization headers, etc.)
+}));
 
 app.use(express.json());
 app.use(cookieParser());
