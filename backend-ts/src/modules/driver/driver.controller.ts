@@ -53,4 +53,27 @@ export const driverController = {
             res.status(statusCode).json({ message: getMessage(error) });
         }
     },
+
+    getMyRoute: async (req: Request, res: Response): Promise<void> => {
+        try {
+            if (!req.user?.sub) {
+                res.status(401).json({ message: 'Unauthorized' });
+                return;
+            }
+
+            const data = await driverService.getMyRoute(req.user.sub);
+
+            res.status(200).json(data);
+        } catch (error) {
+            const message = getMessage(error);
+            const statusCode =
+                message === 'No bus assigned to this driver' ||
+                message === 'No route assigned to this bus' ||
+                message === 'Route not found'
+                    ? 404
+                    : 400;
+
+            res.status(statusCode).json({ message });
+        }
+    },
 };
