@@ -13,4 +13,3 @@ driverRouter.get('/admin/all', requireAuth, requireRole(ROLES.ADMIN), driverCont
 driverRouter.get('/me', requireAuth, requireRole(ROLES.DRIVER), driverController.getMyDetails);
 driverRouter.get('/my-bus', requireAuth, requireRole(ROLES.DRIVER), driverController.getMyBus);
 driverRouter.get('/my-route', requireAuth, requireRole(ROLES.DRIVER), driverController.getMyRoute);
-
