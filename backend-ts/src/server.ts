@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import cookieParser from 'cookie-parser';
+import { createServer } from 'http';
 import { connectDB } from './config/db.config';
 import { ENV } from './config/env.config';
 import { logger } from './utils/logger';
@@ -9,6 +10,8 @@ import { driverRouter } from './modules/driver/driver.routes';
 import { routeRouter } from './modules/route/route.routes';
 import { stopRouter } from './modules/stop/stop.routes';
 import { userRouter } from './modules/user/user.routes';
+import { trackingRouter } from './modules/tracking/tracking.routes';
+import { initSocket } from './websocket/socket.server';
 
 
 import cors from 'cors';
@@ -30,9 +33,13 @@ app.use('/api/driver', driverRouter);
 app.use('/api/admin/routes', routeRouter);
 app.use('/api/admin', stopRouter);
 app.use('/api/admin/users', userRouter);
+app.use('/api/tracking', trackingRouter);
 
 connectDB().then(() => {
-    app.listen(ENV.PORT, () => {
+    const server = createServer(app);
+    initSocket(server);
+
+    server.listen(ENV.PORT, () => {
         logger.info(`Server is running on port http://localhost:${ENV.PORT}`);
     });
 });
