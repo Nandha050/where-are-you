@@ -55,6 +55,10 @@ export const routeService = {
         const route = await Route.create({
             organizationId,
             name: input.name.trim(),
+            startLat: input.startLat,
+            startLng: input.startLng,
+            endLat: input.endLat,
+            endLng: input.endLng,
             encodedPolyline: result.overview_polyline.points,
             totalDistanceMeters: leg.distance.value,
             estimatedDurationSeconds: leg.duration.value,
@@ -88,6 +92,10 @@ export const routeService = {
 const formatRoute = (route: InstanceType<typeof Route>) => ({
     id: String(route._id),
     name: route.name,
+    startLat: route.startLat,
+    startLng: route.startLng,
+    endLat: route.endLat,
+    endLng: route.endLng,
     encodedPolyline: route.encodedPolyline,
     totalDistanceMeters: route.totalDistanceMeters,
     estimatedDurationSeconds: route.estimatedDurationSeconds,
