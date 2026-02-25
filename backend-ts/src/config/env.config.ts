@@ -1,6 +1,15 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+const parseNumber = (value: string | undefined, fallback: number): number => {
+    if (!value) {
+        return fallback;
+    }
+
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 export const ENV = {
     PORT: process.env.PORT || 3000,
     MONGO_URI: process.env.MONGO_URI || 'mongodb://localhost:27017/where-you-are',
@@ -10,4 +19,6 @@ export const ENV = {
     REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET || 'change-me-refresh-secret',
     REFRESH_TOKEN_EXPIRES_IN: process.env.REFRESH_TOKEN_EXPIRES_IN || '30d',
     GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || '',
+    TRACKING_UPDATE_INTERVAL_MS: parseNumber(process.env.TRACKING_UPDATE_INTERVAL_MS, 5000),
+    TRACKING_MOVEMENT_THRESHOLD_METERS: parseNumber(process.env.TRACKING_MOVEMENT_THRESHOLD_METERS, 10),
 };

@@ -4,6 +4,8 @@ import { LocationLog } from '../locationLog/locationLog.model';
 import { TRACKING_EVENTS } from './tracking.events';
 import { getBusRoom } from '../../websocket/socket.rooms';
 import { getIO } from '../../websocket/socket.server';
+import { ENV } from '../../config/env.config';
+import { calculateDistanceMeters } from '../../utils/calculateDistance';
 
 const validateCoordinates = (latitude: number, longitude: number): void => {
 	if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
@@ -20,21 +22,46 @@ export const trackingService = {
 		validateCoordinates(latitude, longitude);
 
 		const now = new Date();
-
-		const bus = await Bus.findByIdAndUpdate(
-			busId,
-			{
-				currentLat: latitude,
-				currentLng: longitude,
-				lastUpdated: now,
-				trackingStatus: 'running',
-			},
-			{ new: true }
-		);
+		const bus = await Bus.findById(busId);
 
 		if (!bus) {
 			throw new Error('Bus not found');
 		}
+
+		const hasPreviousLocation =
+			typeof bus.currentLat === 'number' &&
+			typeof bus.currentLng === 'number' &&
+			Number.isFinite(bus.currentLat) &&
+			Number.isFinite(bus.currentLng);
+
+		const previousTimestamp = bus.lastUpdated ? new Date(bus.lastUpdated).getTime() : null;
+		const elapsedMs = previousTimestamp ? now.getTime() - previousTimestamp : Number.MAX_SAFE_INTEGER;
+		const movedMeters = hasPreviousLocation
+			? calculateDistanceMeters(bus.currentLat, bus.currentLng, latitude, longitude)
+			: Number.MAX_SAFE_INTEGER;
+
+		const shouldUpdate =
+			!hasPreviousLocation ||
+			elapsedMs >= ENV.TRACKING_UPDATE_INTERVAL_MS ||
+			movedMeters >= ENV.TRACKING_MOVEMENT_THRESHOLD_METERS;
+
+		if (!shouldUpdate) {
+			return {
+				busId: String(bus._id),
+				latitude: bus.currentLat,
+				longitude: bus.currentLng,
+				recordedAt: bus.lastUpdated,
+				skipped: true,
+				reason: 'throttled',
+				nextAllowedInMs: Math.max(0, ENV.TRACKING_UPDATE_INTERVAL_MS - elapsedMs),
+			};
+		}
+
+		bus.currentLat = latitude;
+		bus.currentLng = longitude;
+		bus.lastUpdated = now;
+		bus.trackingStatus = 'running';
+		await bus.save();
 
 		await LocationLog.create({
 			organizationId: bus.organizationId,
@@ -61,6 +88,7 @@ export const trackingService = {
 			latitude: bus.currentLat,
 			longitude: bus.currentLng,
 			recordedAt: now,
+			skipped: false,
 		};
 	},
 
