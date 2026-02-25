@@ -29,12 +29,12 @@ export const driverService = {
             organizationId: String(driver.organizationId),
             assignedBus: assignedBus
                 ? {
-                      id: String(assignedBus._id),
-                      numberPlate: assignedBus.numberPlate,
-                      status: assignedBus.status,
-                      currentLat: assignedBus.currentLat,
-                      currentLng: assignedBus.currentLng,
-                  }
+                    id: String(assignedBus._id),
+                    numberPlate: assignedBus.numberPlate,
+                    status: assignedBus.status,
+                    currentLat: assignedBus.currentLat,
+                    currentLng: assignedBus.currentLng,
+                }
                 : null,
         };
     },
@@ -77,11 +77,14 @@ export const driverService = {
             memberId: driver.memberId,
             assignedBus: assignedBus
                 ? {
-                      id: String(assignedBus._id),
-                      numberPlate: assignedBus.numberPlate,
-                      status: assignedBus.status,
-                  }
+                    id: String(assignedBus._id),
+                    numberPlate: assignedBus.numberPlate,
+                    status: assignedBus.status,
+                }
                 : null,
         };
     },
 };
+
+
+
