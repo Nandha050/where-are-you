@@ -10,6 +10,20 @@ const parseNumber = (value: string | undefined, fallback: number): number => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const parseOrigins = (): string[] => {
+    const configuredOrigins = [
+        process.env.FRONTEND_URL,
+        process.env.FRONTEND_DRIVER_USER_URL,
+        ...(process.env.FRONTEND_URLS
+            ? process.env.FRONTEND_URLS.split(',').map((origin) => origin.trim())
+            : []),
+    ]
+        .map((origin) => (origin || '').trim())
+        .filter((origin) => origin.length > 0);
+
+    return Array.from(new Set(configuredOrigins));
+};
+
 export const ENV = {
     PORT: process.env.PORT || 3000,
     MONGO_URI: process.env.MONGO_URI || 'mongodb://localhost:27017/where-you-are',
@@ -24,4 +38,6 @@ export const ENV = {
     FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
     FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL || '',
     FIREBASE_PRIVATE_KEY: process.env.FIREBASE_PRIVATE_KEY || '',
+    FRONTEND_DRIVER_USER_URL: process.env.FRONTEND_DRIVER_USER_URL || '',
+    FRONTEND_URLS: parseOrigins(),
 };

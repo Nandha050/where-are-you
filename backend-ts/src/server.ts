@@ -20,7 +20,7 @@ import cors from 'cors';
 const app = express();
 // Add CORS middleware with configuration
 app.use(cors({
-    origin: process.env.FRONTEND_URL, // Allow requests from the frontend URL
+    origin: ENV.FRONTEND_URLS.length > 0 ? ENV.FRONTEND_URLS : true,
     credentials: true, // Include credentials (cookies, authorization headers, etc.)
 }));
 
