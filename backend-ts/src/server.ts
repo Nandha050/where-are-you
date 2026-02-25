@@ -10,8 +10,10 @@ import { driverRouter } from './modules/driver/driver.routes';
 import { routeRouter } from './modules/route/route.routes';
 import { stopRouter } from './modules/stop/stop.routes';
 import { userRouter } from './modules/user/user.routes';
+import { userAppRouter } from './modules/user/user.app.routes';
 import { trackingRouter } from './modules/tracking/tracking.routes';
 import { initSocket } from './websocket/socket.server';
+import { notificationRouter } from './modules/notification/notification.routes';
 
 
 import cors from 'cors';
@@ -34,6 +36,8 @@ app.use('/api/admin/routes', routeRouter);
 app.use('/api/admin', stopRouter);
 app.use('/api/admin/users', userRouter);
 app.use('/api/tracking', trackingRouter);
+app.use('/api/user', userAppRouter);
+app.use('/api/user/notifications', notificationRouter);
 
 connectDB().then(() => {
     const server = createServer(app);

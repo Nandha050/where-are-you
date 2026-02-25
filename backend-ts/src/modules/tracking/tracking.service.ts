@@ -6,6 +6,7 @@ import { getBusRoom } from '../../websocket/socket.rooms';
 import { getIO } from '../../websocket/socket.server';
 import { ENV } from '../../config/env.config';
 import { calculateDistanceMeters } from '../../utils/calculateDistance';
+import { notificationService } from '../notification/notification.service';
 
 const validateCoordinates = (latitude: number, longitude: number): void => {
 	if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
@@ -45,6 +46,8 @@ export const trackingService = {
 			elapsedMs >= ENV.TRACKING_UPDATE_INTERVAL_MS ||
 			movedMeters >= ENV.TRACKING_MOVEMENT_THRESHOLD_METERS;
 
+		const wasRunning = bus.trackingStatus === 'running';
+
 		if (!shouldUpdate) {
 			return {
 				busId: String(bus._id),
@@ -69,6 +72,15 @@ export const trackingService = {
 			latitude,
 			longitude,
 			recordedAt: now,
+		});
+
+		await notificationService.processBusLocationUpdate({
+			organizationId: String(bus.organizationId),
+			busId: String(bus._id),
+			busNumberPlate: bus.numberPlate,
+			latitude,
+			longitude,
+			isBusStartedEvent: !wasRunning,
 		});
 
 		try {
