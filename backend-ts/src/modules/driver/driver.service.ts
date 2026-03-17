@@ -3,6 +3,7 @@ import { Bus } from '../bus/bus.model';
 import { Route } from '../route/route.model';
 import { Stop } from '../stop/stop.model';
 import { buildEtaSnapshot } from '../../utils/eta';
+import { calculateDistanceMeters } from '../../utils/calculateDistance';
 
 export const driverService = {
     listDriversByOrganization: async (organizationId: string) => {
@@ -88,6 +89,57 @@ export const driverService = {
             routeId: route._id,
         }).sort({ sequenceOrder: 1 });
 
+        const normalizedStops = stops.map((stop) => ({
+            id: String(stop._id),
+            name: stop.name,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+            sequenceOrder: stop.sequenceOrder,
+            radiusMeters: stop.radiusMeters,
+        }));
+
+        const START_END_MERGE_RADIUS_METERS = 120;
+        const hasStartStop = normalizedStops.some(
+            (stop) =>
+                calculateDistanceMeters(stop.latitude, stop.longitude, route.startLat, route.startLng) <=
+                START_END_MERGE_RADIUS_METERS
+        );
+        const hasEndStop = normalizedStops.some(
+            (stop) =>
+                calculateDistanceMeters(stop.latitude, stop.longitude, route.endLat, route.endLng) <=
+                START_END_MERGE_RADIUS_METERS
+        );
+
+        const firstSequence = normalizedStops.length > 0 ? normalizedStops[0].sequenceOrder : 1;
+        const lastSequence =
+            normalizedStops.length > 0
+                ? normalizedStops[normalizedStops.length - 1].sequenceOrder
+                : firstSequence + 1;
+
+        const stopsForEta = [...normalizedStops];
+
+        if (!hasStartStop) {
+            stopsForEta.push({
+                id: `start-${String(route._id)}`,
+                name: route.startName || 'Start',
+                latitude: route.startLat,
+                longitude: route.startLng,
+                sequenceOrder: firstSequence - 1,
+                radiusMeters: 100,
+            });
+        }
+
+        if (!hasEndStop) {
+            stopsForEta.push({
+                id: `end-${String(route._id)}`,
+                name: route.endName || 'Destination',
+                latitude: route.endLat,
+                longitude: route.endLng,
+                sequenceOrder: lastSequence + 1,
+                radiusMeters: 100,
+            });
+        }
+
         const hasLiveCoordinates =
             typeof bus.currentLat === 'number' &&
             typeof bus.currentLng === 'number' &&
@@ -107,14 +159,7 @@ export const driverService = {
                 endLng: route.endLng,
                 polyline: route.polyline || route.encodedPolyline,
             },
-            stops: stops.map((stop) => ({
-                id: String(stop._id),
-                name: stop.name,
-                latitude: stop.latitude,
-                longitude: stop.longitude,
-                sequenceOrder: stop.sequenceOrder,
-                radiusMeters: stop.radiusMeters,
-            })),
+            stops: stopsForEta,
         });
 
         return {

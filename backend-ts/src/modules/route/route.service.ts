@@ -34,6 +34,8 @@ const isWithinSangareddyBounds = (lat: number, lng: number): boolean =>
 
 interface CreateRouteInput {
     name: string;
+    startName?: string;
+    endName?: string;
     startLat: number;
     startLng: number;
     endLat: number;
@@ -42,6 +44,8 @@ interface CreateRouteInput {
 
 interface UpdateRouteInput {
     name?: string;
+    startName?: string;
+    endName?: string;
     startLat?: number;
     startLng?: number;
     endLat?: number;
@@ -353,6 +357,8 @@ export const routeService = {
         const route = await Route.create({
             organizationId,
             name: input.name.trim(),
+            startName: input.startName?.trim() || 'Start',
+            endName: input.endName?.trim() || 'Destination',
             startLat: input.startLat,
             startLng: input.startLng,
             endLat: input.endLat,
@@ -413,6 +419,16 @@ export const routeService = {
         if (input.endLng !== undefined && input.endLng !== route.endLng) {
             route.endLng = input.endLng;
             hasRouteChanged = true;
+        }
+
+        const nextStartName = input.startName?.trim();
+        if (nextStartName && nextStartName !== route.startName) {
+            route.startName = nextStartName;
+        }
+
+        const nextEndName = input.endName?.trim();
+        if (nextEndName && nextEndName !== route.endName) {
+            route.endName = nextEndName;
         }
 
         if (input.isActive !== undefined && input.isActive !== route.isActive) {
@@ -507,10 +523,12 @@ export const routeService = {
             encodedPolyline: prepared.polyline,
             route_id: String(route._id),
             start: {
+                name: route.startName || 'Start',
                 lat: route.startLat,
                 lng: route.startLng,
             },
             destination: {
+                name: route.endName || 'Destination',
                 lat: route.endLat,
                 lng: route.endLng,
             },
@@ -557,6 +575,8 @@ export const routeService = {
 const formatRoute = (route: InstanceType<typeof Route>) => ({
     id: String(route._id),
     name: route.name,
+    startName: route.startName || 'Start',
+    endName: route.endName || 'Destination',
     startLat: route.startLat,
     startLng: route.startLng,
     endLat: route.endLat,
