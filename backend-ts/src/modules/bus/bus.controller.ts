@@ -81,14 +81,20 @@ export const busController = {
             }
 
             const { busId } = req.params as { busId: string };
-            const { memberId } = req.body as { memberId?: string };
+            const { memberId, driverId } = req.body as { memberId?: string; driverId?: string };
 
-            if (!memberId || memberId.trim().length === 0) {
-                res.status(400).json({ message: 'memberId is required' });
+            const normalizedMemberId = memberId?.trim();
+            const normalizedDriverId = driverId?.trim();
+
+            if (!normalizedMemberId && !normalizedDriverId) {
+                res.status(400).json({ message: 'memberId or driverId is required' });
                 return;
             }
 
-            const bus = await busService.updateBusDriver(req.user.organizationId, busId, memberId.trim());
+            const bus = await busService.updateBusDriver(req.user.organizationId, busId, {
+                memberId: normalizedMemberId,
+                driverId: normalizedDriverId,
+            });
 
             res.status(200).json({ bus });
         } catch (error) {

@@ -62,6 +62,41 @@ const buildBusPayload = (bus: any) => {
     };
 };
 
+const resolveDriverForAssignment = async (
+    organizationId: string,
+    input: { memberId?: string; driverId?: string }
+) => {
+    const memberId = input.memberId?.trim();
+    const driverId = input.driverId?.trim();
+
+    if (memberId) {
+        const driverByMemberId = await Driver.findOne({ organizationId, memberId });
+        if (!driverByMemberId) {
+            throw new Error(`Driver with memberId '${memberId}' not found`);
+        }
+
+        return driverByMemberId;
+    }
+
+    if (driverId) {
+        const driverById = await Driver.findOne({ _id: driverId, organizationId });
+        if (!driverById) {
+            const crossOrgDriver = await Driver.findById(driverId).select('_id organizationId memberId');
+            if (crossOrgDriver) {
+                throw new Error(
+                    `Driver '${driverId}' belongs to a different organization. Use a driver from this organization or login to the matching org.`
+                );
+            }
+
+            throw new Error(`Driver with id '${driverId}' not found`);
+        }
+
+        return driverById;
+    }
+
+    throw new Error('memberId or driverId is required');
+};
+
 export const busService = {
     createBus: async (organizationId: string, input: CreateBusInput) => {
         const existingBus = await Bus.findOne({
@@ -113,7 +148,11 @@ export const busService = {
         return buildBusPayload(bus);
     },
 
-    updateBusDriver: async (organizationId: string, busId: string, memberId: string) => {
+    updateBusDriver: async (
+        organizationId: string,
+        busId: string,
+        input: { memberId?: string; driverId?: string }
+    ) => {
         const bus = await Bus.findOne({
             _id: busId,
             organizationId,
@@ -123,15 +162,7 @@ export const busService = {
             throw new Error('Bus not found');
         }
 
-        // Find driver by memberId
-        const driver = await Driver.findOne({
-            organizationId,
-            memberId: memberId,
-        });
-
-        if (!driver) {
-            throw new Error(`Driver with memberId '${memberId}' not found`);
-        }
+        const driver = await resolveDriverForAssignment(organizationId, input);
 
         // Remove previous driver from this bus
         if (bus.driverId) {
