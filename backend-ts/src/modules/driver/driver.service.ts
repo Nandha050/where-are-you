@@ -32,6 +32,47 @@ const formatBusSnapshot = (bus: any) => {
     };
 };
 
+const buildNoBusAssignedMessage = (driver: { memberId?: string }) =>
+    `No bus assigned to this driver. Ask admin to assign a bus to memberId '${driver.memberId || 'unknown'}'.`;
+
+const resolveAssignedBusForDriver = async (driver: any) => {
+    if (!driver) {
+        return null;
+    }
+
+    if (driver.assignedBusId) {
+        const assignedBus = await Bus.findOne({
+            _id: driver.assignedBusId,
+            organizationId: driver.organizationId,
+        });
+
+        if (assignedBus) {
+            if (!assignedBus.driverId || String(assignedBus.driverId) !== String(driver._id)) {
+                assignedBus.driverId = driver._id;
+                await assignedBus.save();
+            }
+
+            return assignedBus;
+        }
+    }
+
+    const busByDriver = await Bus.findOne({
+        organizationId: driver.organizationId,
+        driverId: driver._id,
+    });
+
+    if (!busByDriver) {
+        return null;
+    }
+
+    if (!driver.assignedBusId || String(driver.assignedBusId) !== String(busByDriver._id)) {
+        driver.assignedBusId = busByDriver._id;
+        await driver.save();
+    }
+
+    return busByDriver;
+};
+
 export const driverService = {
     listDriversByOrganization: async (organizationId: string) => {
         const drivers = await Driver.find({ organizationId })
@@ -45,16 +86,13 @@ export const driverService = {
         }));
     },
     getMyDetails: async (driverId: string) => {
-        const driver = await Driver.findById(driverId).populate(
-            'assignedBusId',
-            'numberPlate status fleetStatus tripStatus trackingStatus currentLat currentLng lastUpdated'
-        );
+        const driver = await Driver.findById(driverId);
 
         if (!driver) {
             throw new Error('Driver not found');
         }
 
-        const assignedBus = driver.assignedBusId as any;
+        const assignedBus = await resolveAssignedBusForDriver(driver);
 
         return {
             id: String(driver._id),
@@ -66,25 +104,33 @@ export const driverService = {
     },
 
     getMyBus: async (driverId: string) => {
-        const driver = await Driver.findById(driverId).populate('assignedBusId');
+        const driver = await Driver.findById(driverId);
 
-        if (!driver || !driver.assignedBusId) {
-            throw new Error('No bus assigned to this driver');
+        if (!driver) {
+            throw new Error('Driver not found');
         }
 
-        const bus = driver.assignedBusId as any;
+        const bus = await resolveAssignedBusForDriver(driver);
+
+        if (!bus) {
+            throw new Error(buildNoBusAssignedMessage(driver));
+        }
 
         return formatBusSnapshot(bus);
     },
 
     getMyRoute: async (driverId: string) => {
-        const driver = await Driver.findById(driverId).populate('assignedBusId');
+        const driver = await Driver.findById(driverId);
 
-        if (!driver || !driver.assignedBusId) {
-            throw new Error('No bus assigned to this driver');
+        if (!driver) {
+            throw new Error('Driver not found');
         }
 
-        const bus = driver.assignedBusId as any;
+        const bus = await resolveAssignedBusForDriver(driver);
+
+        if (!bus) {
+            throw new Error(buildNoBusAssignedMessage(driver));
+        }
 
         if (!bus.routeId) {
             throw new Error('No route assigned to this bus');
@@ -164,8 +210,8 @@ export const driverService = {
 
         const eta = buildEtaSnapshot({
             current: {
-                latitude: hasLiveCoordinates ? bus.currentLat : route.startLat,
-                longitude: hasLiveCoordinates ? bus.currentLng : route.startLng,
+                latitude: hasLiveCoordinates ? bus.currentLat! : route.startLat,
+                longitude: hasLiveCoordinates ? bus.currentLng! : route.startLng,
             },
             route: {
                 totalDistanceMeters: route.totalDistanceMeters,
@@ -208,14 +254,10 @@ export const driverService = {
             throw new Error('Driver not found');
         }
 
-        if (!driver.assignedBusId) {
-            throw new Error('No bus assigned to this driver');
-        }
-
-        const bus = await Bus.findOne({ _id: driver.assignedBusId, organizationId });
+        const bus = await resolveAssignedBusForDriver(driver);
 
         if (!bus) {
-            throw new Error('Assigned bus not found');
+            throw new Error(buildNoBusAssignedMessage(driver));
         }
 
         const statuses = deriveBusStatusesFromDocument(bus);
@@ -279,14 +321,10 @@ export const driverService = {
             throw new Error('Driver not found');
         }
 
-        if (!driver.assignedBusId) {
-            throw new Error('No bus assigned to this driver');
-        }
-
-        const bus = await Bus.findOne({ _id: driver.assignedBusId, organizationId });
+        const bus = await resolveAssignedBusForDriver(driver);
 
         if (!bus) {
-            throw new Error('Assigned bus not found');
+            throw new Error(buildNoBusAssignedMessage(driver));
         }
 
         driver.isTracking = false;
@@ -357,11 +395,11 @@ export const driverService = {
         isConnected: boolean
     ) => {
         const driver = await Driver.findOne({ _id: driverId, organizationId });
-        if (!driver?.assignedBusId) {
+        if (!driver) {
             return null;
         }
 
-        const bus = await Bus.findOne({ _id: driver.assignedBusId, organizationId });
+        const bus = await resolveAssignedBusForDriver(driver);
         if (!bus) {
             return null;
         }

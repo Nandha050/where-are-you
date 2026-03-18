@@ -49,7 +49,12 @@ export const driverController = {
 
             res.status(200).json({ bus });
         } catch (error) {
-            const statusCode = error instanceof Error && error.message === 'No bus assigned to this driver' ? 404 : 400;
+            const message = getMessage(error);
+            const statusCode =
+                message === 'Driver not found' ||
+                    message.startsWith('No bus assigned to this driver')
+                    ? 404
+                    : 400;
             res.status(statusCode).json({ message: getMessage(error) });
         }
     },
@@ -68,8 +73,9 @@ export const driverController = {
             const message = getMessage(error);
             const statusCode =
                 message === 'No bus assigned to this driver' ||
-                message === 'No route assigned to this bus' ||
-                message === 'Route not found'
+                    message.startsWith('No bus assigned to this driver') ||
+                    message === 'No route assigned to this bus' ||
+                    message === 'Route not found'
                     ? 404
                     : 400;
 
@@ -90,8 +96,7 @@ export const driverController = {
             const message = getMessage(error);
             const statusCode =
                 message === 'Driver not found' ||
-                message === 'No bus assigned to this driver' ||
-                message === 'Assigned bus not found'
+                    message.startsWith('No bus assigned to this driver')
                     ? 404
                     : 400;
 
@@ -112,8 +117,7 @@ export const driverController = {
             const message = getMessage(error);
             const statusCode =
                 message === 'Driver not found' ||
-                message === 'No bus assigned to this driver' ||
-                message === 'Assigned bus not found'
+                    message.startsWith('No bus assigned to this driver')
                     ? 404
                     : 400;
 
