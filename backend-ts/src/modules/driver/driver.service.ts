@@ -2,6 +2,32 @@ import { Driver } from './driver.model';
 import { Bus } from '../bus/bus.model';
 import { Route } from '../route/route.model';
 import { Stop } from '../stop/stop.model';
+import {
+    deriveBusStatusesFromDocument,
+    setBusTripLifecycleFromEvent,
+    syncBusDerivedStatuses,
+} from '../bus/bus.status.workflow';
+import { FLEET_STATUS, TRIP_STATUS } from '../../constants/busStatus';
+
+const formatBusSnapshot = (bus: any) => {
+    if (!bus) {
+        return null;
+    }
+
+    const statuses = deriveBusStatusesFromDocument(bus);
+
+    return {
+        id: String(bus._id),
+        numberPlate: bus.numberPlate,
+        fleetStatus: statuses.fleetStatus,
+        tripStatus: statuses.tripStatus,
+        trackingStatus: statuses.trackingStatus,
+        status: statuses.status,
+        currentLat: bus.currentLat,
+        currentLng: bus.currentLng,
+        lastUpdated: bus.lastUpdated,
+    };
+};
 
 export const driverService = {
     listDriversByOrganization: async (organizationId: string) => {
@@ -16,7 +42,10 @@ export const driverService = {
         }));
     },
     getMyDetails: async (driverId: string) => {
-        const driver = await Driver.findById(driverId).populate('assignedBusId', 'numberPlate status currentLat currentLng');
+        const driver = await Driver.findById(driverId).populate(
+            'assignedBusId',
+            'numberPlate status fleetStatus tripStatus trackingStatus currentLat currentLng lastUpdated'
+        );
 
         if (!driver) {
             throw new Error('Driver not found');
@@ -29,15 +58,7 @@ export const driverService = {
             name: driver.name,
             memberId: driver.memberId,
             organizationId: String(driver.organizationId),
-            assignedBus: assignedBus
-                ? {
-                    id: String(assignedBus._id),
-                    numberPlate: assignedBus.numberPlate,
-                    status: assignedBus.status,
-                    currentLat: assignedBus.currentLat,
-                    currentLng: assignedBus.currentLng,
-                }
-                : null,
+            assignedBus: formatBusSnapshot(assignedBus),
         };
     },
 
@@ -50,14 +71,7 @@ export const driverService = {
 
         const bus = driver.assignedBusId as any;
 
-        return {
-            id: String(bus._id),
-            numberPlate: bus.numberPlate,
-            status: bus.status,
-            currentLat: bus.currentLat,
-            currentLng: bus.currentLng,
-            lastUpdated: bus.lastUpdated,
-        };
+        return formatBusSnapshot(bus);
     },
 
     getMyRoute: async (driverId: string) => {
@@ -128,19 +142,35 @@ export const driverService = {
             throw new Error('Assigned bus not found');
         }
 
+        const statuses = deriveBusStatusesFromDocument(bus);
+        if (statuses.fleetStatus !== FLEET_STATUS.IN_SERVICE) {
+            throw new Error(
+                `Cannot start trip while fleetStatus is ${statuses.fleetStatus}. Set fleet status to IN_SERVICE first.`
+            );
+        }
+
         driver.isTracking = true;
         await driver.save();
 
-        bus.trackingStatus = 'running';
         bus.lastUpdated = new Date();
-        await bus.save();
+        bus.trackerOnline = true;
+
+        const derived = await syncBusDerivedStatuses(bus, {
+            persist: true,
+            latestTelemetry: {
+                timestamp: bus.lastUpdated,
+                speedMps: bus.currentSpeedMps,
+            },
+        });
 
         return {
             tracking: {
                 driverId: String(driver._id),
                 busId: String(bus._id),
                 isTracking: driver.isTracking,
-                trackingStatus: bus.trackingStatus,
+                trackingStatus: derived.trackingStatus,
+                tripStatus: derived.tripStatus,
+                fleetStatus: derived.fleetStatus,
                 startedAt: bus.lastUpdated,
             },
         };
@@ -166,16 +196,33 @@ export const driverService = {
         driver.isTracking = false;
         await driver.save();
 
-        bus.trackingStatus = 'stopped';
         bus.lastUpdated = new Date();
-        await bus.save();
+        bus.trackerOnline = false;
+
+        const statuses = deriveBusStatusesFromDocument(bus);
+        if (
+            statuses.tripStatus === TRIP_STATUS.ON_TRIP ||
+            statuses.tripStatus === TRIP_STATUS.DELAYED
+        ) {
+            setBusTripLifecycleFromEvent(bus, { type: 'trip_completed', at: bus.lastUpdated });
+        }
+
+        const derived = await syncBusDerivedStatuses(bus, {
+            persist: true,
+            latestTelemetry: {
+                timestamp: bus.lastUpdated,
+                speedMps: bus.currentSpeedMps,
+            },
+        });
 
         return {
             tracking: {
                 driverId: String(driver._id),
                 busId: String(bus._id),
                 isTracking: driver.isTracking,
-                trackingStatus: bus.trackingStatus,
+                trackingStatus: derived.trackingStatus,
+                tripStatus: derived.tripStatus,
+                fleetStatus: derived.fleetStatus,
                 stoppedAt: bus.lastUpdated,
             },
         };
@@ -186,7 +233,10 @@ export const driverService = {
             driverId,
             { assignedBusId: busId || null },
             { new: true }
-        ).populate('assignedBusId', 'numberPlate status');
+        ).populate(
+            'assignedBusId',
+            'numberPlate status fleetStatus tripStatus trackingStatus currentLat currentLng lastUpdated'
+        );
 
         if (!driver) {
             throw new Error('Driver not found');
@@ -198,13 +248,7 @@ export const driverService = {
             id: String(driver._id),
             name: driver.name,
             memberId: driver.memberId,
-            assignedBus: assignedBus
-                ? {
-                    id: String(assignedBus._id),
-                    numberPlate: assignedBus.numberPlate,
-                    status: assignedBus.status,
-                }
-                : null,
+            assignedBus: formatBusSnapshot(assignedBus),
         };
     },
 };

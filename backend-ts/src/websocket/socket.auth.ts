@@ -2,11 +2,17 @@ import jwt from 'jsonwebtoken';
 import { ExtendedError, Socket } from 'socket.io';
 import { JWT_CONFIG } from '../config/jwt.config';
 import { AuthenticatedRequestUser } from '../modules/auth/auth.types';
+import { logger } from '../utils/logger';
 
 const parseTokenFromHandshake = (socket: Socket): string | null => {
     const authToken = socket.handshake.auth?.token;
     if (typeof authToken === 'string' && authToken.trim()) {
         return authToken.trim();
+    }
+
+    const queryToken = socket.handshake.query?.token;
+    if (typeof queryToken === 'string' && queryToken.trim()) {
+        return queryToken.trim();
     }
 
     const authorization = socket.handshake.headers.authorization;
@@ -30,10 +36,13 @@ export const authenticateSocket = (
     socket: Socket,
     next: (err?: ExtendedError) => void
 ): void => {
+    const handshakeInfo = `socket=${socket.id}, address=${socket.handshake.address || 'unknown'}, origin=${socket.handshake.headers.origin || 'none'}`;
+
     try {
         const token = parseTokenFromHandshake(socket);
 
         if (!token) {
+            logger.warn(`Socket authentication failed (missing token): ${handshakeInfo}`);
             next(new Error('Unauthorized: missing token'));
             return;
         }
@@ -47,6 +56,7 @@ export const authenticateSocket = (
 
         next();
     } catch (_error) {
+        logger.warn(`Socket authentication failed (invalid/expired token): ${handshakeInfo}`);
         next(new Error('Unauthorized: invalid or expired token'));
     }
 };

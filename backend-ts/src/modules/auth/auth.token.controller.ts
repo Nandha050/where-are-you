@@ -5,6 +5,8 @@ import { setAuthCookies, clearAuthCookies } from '../../utils/cookies';
 import { User } from '../user/user.model';
 import { Driver } from '../driver/driver.model';
 import { Bus } from '../bus/bus.model';
+import { deriveBusStatusesFromDocument, setBusTripLifecycleFromEvent, syncBusDerivedStatuses } from '../bus/bus.status.workflow';
+import { TRIP_STATUS } from '../../constants/busStatus';
 
 export const refreshTokenController = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -70,10 +72,34 @@ export const logoutDriverController = async (req: Request, res: Response): Promi
             );
 
             if (driver?.assignedBusId) {
-                await Bus.findOneAndUpdate(
-                    { _id: driver.assignedBusId, organizationId: req.user.organizationId },
-                    { trackingStatus: 'stopped', lastUpdated: new Date() }
-                );
+                const bus = await Bus.findOne({
+                    _id: driver.assignedBusId,
+                    organizationId: req.user.organizationId,
+                });
+
+                if (bus) {
+                    bus.trackerOnline = false;
+                    bus.lastUpdated = new Date();
+
+                    const statuses = deriveBusStatusesFromDocument(bus);
+                    if (
+                        statuses.tripStatus === TRIP_STATUS.ON_TRIP ||
+                        statuses.tripStatus === TRIP_STATUS.DELAYED
+                    ) {
+                        setBusTripLifecycleFromEvent(bus, {
+                            type: 'trip_completed',
+                            at: bus.lastUpdated,
+                        });
+                    }
+
+                    await syncBusDerivedStatuses(bus, {
+                        persist: true,
+                        latestTelemetry: {
+                            timestamp: bus.lastUpdated,
+                            speedMps: bus.currentSpeedMps,
+                        },
+                    });
+                }
             }
         }
 

@@ -19,10 +19,22 @@ import { routeDebugRouter } from './modules/route/route.debug.routes';
 
 import cors from 'cors';
 const app = express();
-// Add CORS middleware with configuration
+// Allow configured web origins and also mobile clients that do not send Origin headers.
 app.use(cors({
-    origin: ENV.FRONTEND_URLS.length > 0 ? ENV.FRONTEND_URLS : true,
-    credentials: true, // Include credentials (cookies, authorization headers, etc.)
+    origin: (origin, callback) => {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+
+        if (ENV.FRONTEND_URLS.length === 0 || ENV.FRONTEND_URLS.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
 }));
 
 app.use(express.json());
@@ -45,7 +57,10 @@ connectDB().then(() => {
     const server = createServer(app);
     initSocket(server);
 
-    server.listen(ENV.PORT, () => {
-        logger.info(`Server is running on port http://localhost:${ENV.PORT}`);
+    const port = Number(ENV.PORT) || 3000;
+    const host = '0.0.0.0';
+
+    server.listen(port, host, () => {
+        logger.info(`Server is running on http://${host}:${port}`);
     });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRIP_STATUS_VALUES } from '../../constants/busStatus';
 
 export const createBusSchema = z.object({
     numberPlate: z
@@ -10,3 +11,15 @@ export const createBusSchema = z.object({
 });
 
 export type CreateBusInput = z.infer<typeof createBusSchema>;
+
+export const busMaintenanceSchema = z.object({
+    maintenanceMode: z.boolean(),
+});
+
+export const busTripEventSchema = z.object({
+    eventType: z.enum(['trip_started', 'trip_completed', 'trip_cancelled', 'trip_delayed', 'transition']),
+    delayMinutes: z.number().min(0).optional(),
+    nextTripStatus: z.enum(TRIP_STATUS_VALUES as [string, ...string[]]).optional(),
+    eventAt: z.string().datetime().optional(),
+    routeRemoved: z.boolean().optional(),
+});

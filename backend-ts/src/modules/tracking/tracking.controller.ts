@@ -12,9 +12,11 @@ export const trackingController = {
 				return;
 			}
 
-			const { latitude, longitude } = req.body as {
+			const { latitude, longitude, speed, timestamp } = req.body as {
 				latitude?: number;
 				longitude?: number;
+				speed?: number;
+				timestamp?: string;
 			};
 
 			if (typeof latitude !== 'number' || typeof longitude !== 'number') {
@@ -22,11 +24,27 @@ export const trackingController = {
 				return;
 			}
 
+			if (typeof speed !== 'undefined' && typeof speed !== 'number') {
+				res.status(400).json({ message: 'speed must be a number when provided' });
+				return;
+			}
+
+			let recordedAt: Date | undefined;
+			if (typeof timestamp === 'string' && timestamp.trim().length > 0) {
+				recordedAt = new Date(timestamp);
+				if (Number.isNaN(recordedAt.getTime())) {
+					res.status(400).json({ message: 'timestamp must be a valid ISO date string' });
+					return;
+				}
+			}
+
 			const location = await trackingService.updateMyBusLocation(
 				req.user.sub,
 				req.user.organizationId,
 				latitude,
-				longitude
+				longitude,
+				speed,
+				recordedAt
 			);
 
 			res.status(200).json({ location });
@@ -34,8 +52,8 @@ export const trackingController = {
 			const message = getMessage(error);
 			const statusCode =
 				message === 'Driver not found' ||
-				message === 'No bus assigned to this driver' ||
-				message === 'Assigned bus not found'
+					message === 'No bus assigned to this driver' ||
+					message === 'Assigned bus not found'
 					? 404
 					: 400;
 

@@ -1,4 +1,5 @@
 import { Socket } from 'socket.io';
+import mongoose from 'mongoose';
 import { TRACKING_EVENTS } from '../modules/tracking/tracking.events';
 import { trackingService } from '../modules/tracking/tracking.service';
 import { logger } from '../utils/logger';
@@ -10,10 +11,15 @@ interface DriverLocationPayload {
 	busId: string;
 	latitude: number;
 	longitude: number;
+	speed?: number;
+	timestamp?: string;
 }
 
 const isValidNumber = (value: unknown): value is number =>
 	typeof value === 'number' && Number.isFinite(value);
+
+const escapeRegex = (value: string): string =>
+	value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export const registerSocketHandlers = (socket: Socket): void => {
 	socket.on(TRACKING_EVENTS.JOIN_BUS_ROOM, async (busId: string) => {
@@ -27,19 +33,27 @@ export const registerSocketHandlers = (socket: Socket): void => {
 			}
 
 			const trimmedBusId = busId.trim();
+			const busSelectors: Array<Record<string, unknown>> = [
+				{ numberPlate: new RegExp(`^${escapeRegex(trimmedBusId)}$`, 'i') },
+			];
+
+			if (mongoose.isValidObjectId(trimmedBusId)) {
+				busSelectors.unshift({ _id: trimmedBusId });
+			}
+
 			const bus = await Bus.findOne({
-				_id: trimmedBusId,
 				organizationId: socket.data.user.organizationId,
-			}).select('_id');
+				$or: busSelectors,
+			}).select('_id numberPlate');
 
 			if (!bus) {
 				logger.warn(
-					`joinBusRoom denied: socket=${socket.id}, role=${socket.data.user.role}, busId=${trimmedBusId}`
+					`joinBusRoom denied: socket=${socket.id}, role=${socket.data.user.role}, busRef=${trimmedBusId}`
 				);
 				return;
 			}
 
-			socket.join(getBusRoom(trimmedBusId));
+			socket.join(getBusRoom(String(bus._id)));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown socket error';
 			logger.warn(`joinBusRoom failed for socket ${socket.id}: ${message}`);
@@ -65,11 +79,25 @@ export const registerSocketHandlers = (socket: Socket): void => {
 				return;
 			}
 
+			if (typeof payload.speed !== 'undefined' && !isValidNumber(payload.speed)) {
+				return;
+			}
+
+			let recordedAt: Date | undefined;
+			if (typeof payload.timestamp === 'string' && payload.timestamp.trim().length > 0) {
+				recordedAt = new Date(payload.timestamp);
+				if (Number.isNaN(recordedAt.getTime())) {
+					return;
+				}
+			}
+
 			const updated = await trackingService.updateMyBusLocation(
 				socket.data.user.sub,
 				socket.data.user.organizationId,
 				payload.latitude,
-				payload.longitude
+				payload.longitude,
+				payload.speed,
+				recordedAt
 			);
 
 			if (payload.busId && payload.busId.trim() && payload.busId.trim() !== updated.busId) {

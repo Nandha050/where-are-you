@@ -5,6 +5,7 @@ import { Bus } from '../bus/bus.model';
 import { Route } from '../route/route.model';
 import { Stop } from '../stop/stop.model';
 import { BusSubscription } from '../busSubscription/busSubscription.model';
+import { deriveBusStatusesFromDocument } from '../bus/bus.status.workflow';
 
 const toObjectId = (id: string) => new mongoose.Types.ObjectId(id);
 
@@ -15,6 +16,22 @@ const formatUser = (user: InstanceType<typeof User>) => ({
     organizationId: String(user.organizationId),
     createdAt: user.createdAt,
 });
+
+const formatBusForClient = (bus: any) => {
+    const statuses = deriveBusStatusesFromDocument(bus);
+
+    return {
+        id: String(bus._id),
+        numberPlate: bus.numberPlate,
+        fleetStatus: statuses.fleetStatus,
+        tripStatus: statuses.tripStatus,
+        trackingStatus: statuses.trackingStatus,
+        status: statuses.status,
+        currentLat: bus.currentLat,
+        currentLng: bus.currentLng,
+        lastUpdated: bus.lastUpdated,
+    };
+};
 
 export const userService = {
     getUsers: async (organizationId: string) => {
@@ -73,20 +90,17 @@ export const userService = {
 
         return buses.map((bus) => {
             const route = bus.routeId as any;
+            const busPayload = formatBusForClient(bus);
 
             return {
-                id: String(bus._id),
-                numberPlate: bus.numberPlate,
-                status: bus.status,
-                trackingStatus: bus.trackingStatus,
-                currentLat: bus.currentLat,
-                currentLng: bus.currentLng,
-                lastUpdated: bus.lastUpdated,
+                ...busPayload,
+                routeId: route ? String(route._id) : null,
+                routeName: route?.name || null,
                 route: route
                     ? {
-                          id: String(route._id),
-                          name: route.name,
-                      }
+                        id: String(route._id),
+                        name: route.name,
+                    }
                     : null,
             };
         });
@@ -105,31 +119,27 @@ export const userService = {
         const route = bus.routeId as any;
         const stops = route
             ? await Stop.find({
-                  organizationId: toObjectId(organizationId),
-                  routeId: route._id,
-              }).sort({ sequenceOrder: 1 })
+                organizationId: toObjectId(organizationId),
+                routeId: route._id,
+            }).sort({ sequenceOrder: 1 })
             : [];
 
         return {
             bus: {
-                id: String(bus._id),
-                numberPlate: bus.numberPlate,
-                status: bus.status,
-                trackingStatus: bus.trackingStatus,
-                currentLat: bus.currentLat,
-                currentLng: bus.currentLng,
-                lastUpdated: bus.lastUpdated,
+                ...formatBusForClient(bus),
+                routeId: route ? String(route._id) : null,
+                routeName: route?.name || null,
             },
             route: route
                 ? {
-                      id: String(route._id),
-                      name: route.name,
-                      startLat: route.startLat,
-                      startLng: route.startLng,
-                      endLat: route.endLat,
-                      endLng: route.endLng,
-                      encodedPolyline: route.encodedPolyline,
-                  }
+                    id: String(route._id),
+                    name: route.name,
+                    startLat: route.startLat,
+                    startLng: route.startLng,
+                    endLat: route.endLat,
+                    endLng: route.endLng,
+                    encodedPolyline: route.encodedPolyline,
+                }
                 : null,
             stops: stops.map((stop) => ({
                 id: String(stop._id),
@@ -205,13 +215,13 @@ export const userService = {
             busId: String(subscription!.busId),
             stop: populatedStop
                 ? {
-                      id: String(populatedStop._id),
-                      name: populatedStop.name,
-                      latitude: populatedStop.latitude,
-                      longitude: populatedStop.longitude,
-                      sequenceOrder: populatedStop.sequenceOrder,
-                      radiusMeters: populatedStop.radiusMeters,
-                  }
+                    id: String(populatedStop._id),
+                    name: populatedStop.name,
+                    latitude: populatedStop.latitude,
+                    longitude: populatedStop.longitude,
+                    sequenceOrder: populatedStop.sequenceOrder,
+                    radiusMeters: populatedStop.radiusMeters,
+                }
                 : null,
             notifyOnBusStart: subscription!.notifyOnBusStart,
             notifyOnNearStop: subscription!.notifyOnNearStop,
@@ -230,7 +240,10 @@ export const userService = {
             userId: toObjectId(userId),
             isActive: true,
         })
-            .populate('busId', 'numberPlate status trackingStatus currentLat currentLng lastUpdated')
+            .populate(
+                'busId',
+                'numberPlate status fleetStatus tripStatus trackingStatus currentLat currentLng lastUpdated routeId'
+            )
             .populate('stopId', 'name latitude longitude sequenceOrder radiusMeters')
             .sort({ createdAt: -1 });
 
@@ -241,25 +254,17 @@ export const userService = {
             return {
                 id: String(subscription._id),
                 bus: bus
-                    ? {
-                          id: String(bus._id),
-                          numberPlate: bus.numberPlate,
-                          status: bus.status,
-                          trackingStatus: bus.trackingStatus,
-                          currentLat: bus.currentLat,
-                          currentLng: bus.currentLng,
-                          lastUpdated: bus.lastUpdated,
-                      }
+                    ? formatBusForClient(bus)
                     : null,
                 stop: stop
                     ? {
-                          id: String(stop._id),
-                          name: stop.name,
-                          latitude: stop.latitude,
-                          longitude: stop.longitude,
-                          sequenceOrder: stop.sequenceOrder,
-                          radiusMeters: stop.radiusMeters,
-                      }
+                        id: String(stop._id),
+                        name: stop.name,
+                        latitude: stop.latitude,
+                        longitude: stop.longitude,
+                        sequenceOrder: stop.sequenceOrder,
+                        radiusMeters: stop.radiusMeters,
+                    }
                     : null,
                 notifyOnBusStart: subscription.notifyOnBusStart,
                 notifyOnNearStop: subscription.notifyOnNearStop,

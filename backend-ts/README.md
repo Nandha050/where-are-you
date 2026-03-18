@@ -9,6 +9,34 @@ Authorization: Bearer <token>
 
 ---
 
+## Bus Status Model (Canonical)
+
+Backend now exposes three canonical status fields for every bus response:
+
+- `fleetStatus`: `IN_SERVICE` | `OUT_OF_SERVICE` | `MAINTENANCE`
+- `tripStatus`: `NOT_SCHEDULED` | `TRIP_NOT_STARTED` | `ON_TRIP` | `COMPLETED` | `DELAYED` | `CANCELLED` | `MAINTENANCE_HOLD`
+- `trackingStatus`: `RUNNING` | `IDLE` | `OFFLINE` | `NO_SIGNAL`
+
+Legacy compatibility is preserved:
+
+- `status` is still returned for old clients.
+- mapping: `IN_SERVICE` -> `active`, `OUT_OF_SERVICE` -> `inactive`, `MAINTENANCE` -> `active`
+
+Default/migration behavior for existing buses:
+
+- no route assigned => `tripStatus = NOT_SCHEDULED`
+- maintenance mode enabled => `tripStatus = MAINTENANCE_HOLD`
+- route assigned (not maintenance) => `tripStatus = TRIP_NOT_STARTED`
+- missing telemetry timestamp/position => `trackingStatus = NO_SIGNAL`
+
+Configurable thresholds (`.env`):
+
+- `TRACKING_STALE_THRESHOLD_MS` (default `60000`)
+- `TRACKING_RUNNING_SPEED_MPS` (default `1.5`)
+- `TRIP_DELAY_THRESHOLD_MINUTES` (default `5`)
+
+---
+
 ## Auth APIs
 
 ### 1. Admin Signup
@@ -171,8 +199,10 @@ Authorization: Bearer <token>
   "bus": {
     "id": "65f3a...",
     "numberPlate": "TS09AB1234",
+    "fleetStatus": "OUT_OF_SERVICE",
+    "tripStatus": "NOT_SCHEDULED",
+    "trackingStatus": "NO_SIGNAL",
     "status": "active",
-    "trackingStatus": "stopped",
     "routeId": "65f2a...",
     "driverId": null
   }
@@ -193,10 +223,13 @@ No body required.
     {
       "id": "65f3a...",
       "numberPlate": "TS09AB1234",
+      "fleetStatus": "IN_SERVICE",
+      "tripStatus": "TRIP_NOT_STARTED",
+      "trackingStatus": "IDLE",
       "status": "active",
-      "trackingStatus": "stopped",
       "driverId": null,
-      "routeId": "65f2a..."
+      "routeId": "65f2a...",
+      "routeName": "Route 1"
     }
   ]
 }
@@ -215,8 +248,10 @@ No body required.
   "bus": {
     "id": "65f3a...",
     "numberPlate": "TS09AB1234",
+    "fleetStatus": "IN_SERVICE",
+    "tripStatus": "ON_TRIP",
+    "trackingStatus": "RUNNING",
     "status": "active",
-    "trackingStatus": "stopped",
     "currentLat": 17.3850,
     "currentLng": 78.4867,
     "lastUpdated": "2026-02-23T10:00:00.000Z"
@@ -281,6 +316,9 @@ No body required.
   "assignedBus": {
     "id": "65f3a...",
     "numberPlate": "TS09AB1234",
+    "fleetStatus": "IN_SERVICE",
+    "tripStatus": "ON_TRIP",
+    "trackingStatus": "RUNNING",
     "status": "active",
     "currentLat": 17.3850,
     "currentLng": 78.4867
@@ -300,12 +338,61 @@ No body required.
 {
   "id": "65f3a...",
   "numberPlate": "TS09AB1234",
+  "fleetStatus": "IN_SERVICE",
+  "tripStatus": "ON_TRIP",
+  "trackingStatus": "RUNNING",
   "status": "active",
   "currentLat": 17.3850,
   "currentLng": 78.4867,
   "lastUpdated": "2026-02-23T10:00:00.000Z"
 }
 ```
+
+---
+
+## Bus Workflow APIs (Admin)
+
+### Toggle Maintenance Mode
+**PATCH** `/api/buses/:busId/maintenance`
+
+**Request Body:**
+```json
+{
+  "maintenanceMode": true
+}
+```
+
+Effects:
+
+- when `true`: `fleetStatus = MAINTENANCE`, `tripStatus = MAINTENANCE_HOLD`
+- when `false`: returns to `TRIP_NOT_STARTED` (if route assigned) or `NOT_SCHEDULED`
+
+### Trip Event Transitions
+**POST** `/api/buses/:busId/trip-events`
+
+**Request Body examples:**
+
+```json
+{ "eventType": "trip_started" }
+```
+
+```json
+{ "eventType": "trip_completed" }
+```
+
+```json
+{ "eventType": "trip_cancelled" }
+```
+
+```json
+{ "eventType": "trip_delayed", "delayMinutes": 15 }
+```
+
+```json
+{ "eventType": "transition", "nextTripStatus": "TRIP_NOT_STARTED" }
+```
+
+Transition guardrails return explicit `400` messages for invalid transitions (for example, `ON_TRIP -> NOT_SCHEDULED` without route removal).
 
 ---
 

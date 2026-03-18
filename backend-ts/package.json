@@ -9,8 +9,12 @@
   "scripts": {
     "dev": "nodemon",
     "start": "node dist/server.js",
-    "test": "npm run test:route-polyline",
-    "test:route-polyline": "node --test -r ts-node/register tests/route.polyline.test.js"
+    "test": "npm run test:route-polyline && npm run test:bus-statuses",
+    "test:route-polyline": "node --test -r ts-node/register tests/route.polyline.test.js",
+    "test:bus-statuses": "node --test -r ts-node/register tests/bus.statuses.test.js",
+    "typecheck": "npx tsc --noEmit",
+    "migrate:bus-statuses": "ts-node scripts/migrate-bus-statuses.ts",
+    "migrate:bus-statuses:dry": "ts-node scripts/migrate-bus-statuses.ts --dry-run"
   },
   "keywords": [],
   "author": "",

@@ -35,6 +35,9 @@
     "driverId": "699c5e5d194c60d83f155462",
     "driverMemberId": "D2002",
     "driverName": "John Doe",
+    "fleetStatus": "IN_SERVICE",
+    "tripStatus": "TRIP_NOT_STARTED",
+    "trackingStatus": "IDLE",
     "status": "inactive"
   }
 }
@@ -78,8 +81,13 @@ curl -X PUT http://localhost:3000/api/buses/699c82fd3ababdd7d2502190/driver \
     "numberPlate": "ABC123",
     "routeId": "699c9b849386a3c2d14fb35e",
     "routeName": "Route 1",
+    "fleetStatus": "IN_SERVICE",
+    "tripStatus": "TRIP_NOT_STARTED",
+    "trackingStatus": "IDLE",
     "status": "inactive",
-    "trackingStatus": "idle"
+    "currentLat": 17.385,
+    "currentLng": 78.486,
+    "lastUpdated": "2026-03-16T12:00:00.000Z"
   }
 }
 ```
@@ -146,3 +154,57 @@ or
    - Organization-scoped lookups (no cross-org assignments)
 4. Names and IDs are case-sensitive
 5. Whitespace is automatically trimmed from input
+
+---
+
+## New Admin Workflow Endpoints
+
+### Toggle Maintenance
+
+**Endpoint:** `PATCH /api/buses/:busId/maintenance`
+
+**Request:**
+```json
+{
+  "maintenanceMode": true
+}
+```
+
+When enabled, backend enforces:
+
+- `fleetStatus = MAINTENANCE`
+- `tripStatus = MAINTENANCE_HOLD`
+
+### Apply Trip Event / Transition
+
+**Endpoint:** `POST /api/buses/:busId/trip-events`
+
+Examples:
+
+```json
+{ "eventType": "trip_started" }
+```
+
+```json
+{ "eventType": "trip_completed" }
+```
+
+```json
+{ "eventType": "trip_cancelled" }
+```
+
+```json
+{ "eventType": "trip_delayed", "delayMinutes": 10 }
+```
+
+```json
+{ "eventType": "transition", "nextTripStatus": "TRIP_NOT_STARTED" }
+```
+
+Invalid transitions return explicit errors, for example:
+
+```json
+{
+  "message": "Invalid trip status transition: ON_TRIP -> NOT_SCHEDULED requires route removal."
+}
+```
