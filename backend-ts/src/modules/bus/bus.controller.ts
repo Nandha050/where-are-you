@@ -141,6 +141,14 @@ export const busController = {
             res.status(200).json({ bus });
         } catch (error) {
             const msg = error instanceof Error ? error.message : 'Something went wrong';
+            if (msg.startsWith('Route change blocked:')) {
+                res.status(409).json({
+                    message: msg,
+                    action: 'complete_or_cancel_trip_then_retry',
+                });
+                return;
+            }
+
             const status = msg === 'Bus not found' || msg.includes('Route') ? 404 : 400;
             res.status(status).json({ message: msg });
         }

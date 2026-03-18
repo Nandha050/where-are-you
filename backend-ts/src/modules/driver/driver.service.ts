@@ -3,6 +3,7 @@ import { Bus } from '../bus/bus.model';
 import { Route } from '../route/route.model';
 import { Stop } from '../stop/stop.model';
 import {
+    applyRouteAssignmentStatus,
     deriveBusStatusesFromDocument,
     setBusTripLifecycleFromEvent,
     syncBusDerivedStatuses,
@@ -224,11 +225,31 @@ export const driverService = {
             );
         }
 
+        if (!bus.routeId) {
+            throw new Error('Cannot start trip because no route is assigned to this bus. Assign a route first.');
+        }
+
         driver.isTracking = true;
         await driver.save();
 
         bus.lastUpdated = new Date();
-        bus.trackerOnline = true;
+
+        const latestTripStatus = bus.tripStatus || deriveBusStatusesFromDocument(bus).tripStatus;
+        if (bus.trackerOnline) {
+            if (
+                latestTripStatus !== TRIP_STATUS.ON_TRIP &&
+                latestTripStatus !== TRIP_STATUS.DELAYED
+            ) {
+                if (latestTripStatus !== TRIP_STATUS.TRIP_NOT_STARTED) {
+                    applyRouteAssignmentStatus(bus);
+                }
+
+                setBusTripLifecycleFromEvent(bus, { type: 'trip_started', at: bus.lastUpdated });
+            }
+        } else {
+            // Tracking is enabled, but ON_TRIP should only happen after live socket connection.
+            applyRouteAssignmentStatus(bus);
+        }
 
         const derived = await syncBusDerivedStatuses(bus, {
             persist: true,
@@ -282,6 +303,9 @@ export const driverService = {
             setBusTripLifecycleFromEvent(bus, { type: 'trip_completed', at: bus.lastUpdated });
         }
 
+        // When tracking is off (or socket disconnected), keep route-assigned buses at TRIP_NOT_STARTED.
+        applyRouteAssignmentStatus(bus);
+
         const derived = await syncBusDerivedStatuses(bus, {
             persist: true,
             latestTelemetry: {
@@ -324,6 +348,69 @@ export const driverService = {
             name: driver.name,
             memberId: driver.memberId,
             assignedBus: formatBusSnapshot(assignedBus),
+        };
+    },
+
+    syncTripStatusWithSocketConnection: async (
+        driverId: string,
+        organizationId: string,
+        isConnected: boolean
+    ) => {
+        const driver = await Driver.findOne({ _id: driverId, organizationId });
+        if (!driver?.assignedBusId) {
+            return null;
+        }
+
+        const bus = await Bus.findOne({ _id: driver.assignedBusId, organizationId });
+        if (!bus) {
+            return null;
+        }
+
+        bus.lastUpdated = new Date();
+        bus.trackerOnline = isConnected;
+
+        const statuses = deriveBusStatusesFromDocument(bus);
+
+        if (driver.isTracking) {
+            if (isConnected) {
+                if (
+                    statuses.fleetStatus === FLEET_STATUS.IN_SERVICE &&
+                    bus.routeId &&
+                    statuses.tripStatus !== TRIP_STATUS.ON_TRIP &&
+                    statuses.tripStatus !== TRIP_STATUS.DELAYED
+                ) {
+                    if (statuses.tripStatus !== TRIP_STATUS.TRIP_NOT_STARTED) {
+                        applyRouteAssignmentStatus(bus);
+                    }
+
+                    setBusTripLifecycleFromEvent(bus, { type: 'trip_started', at: bus.lastUpdated });
+                }
+            } else {
+                if (
+                    statuses.tripStatus === TRIP_STATUS.ON_TRIP ||
+                    statuses.tripStatus === TRIP_STATUS.DELAYED
+                ) {
+                    setBusTripLifecycleFromEvent(bus, { type: 'trip_completed', at: bus.lastUpdated });
+                }
+
+                applyRouteAssignmentStatus(bus);
+            }
+        }
+
+        const derived = await syncBusDerivedStatuses(bus, {
+            persist: true,
+            latestTelemetry: {
+                timestamp: bus.lastUpdated,
+                speedMps: bus.currentSpeedMps,
+            },
+        });
+
+        return {
+            busId: String(bus._id),
+            isConnected,
+            isTracking: driver.isTracking,
+            tripStatus: derived.tripStatus,
+            trackingStatus: derived.trackingStatus,
         };
     },
 };

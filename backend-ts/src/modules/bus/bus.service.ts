@@ -177,6 +177,16 @@ export const busService = {
             throw new Error(`Route with name '${routeName}' not found`);
         }
 
+        const currentTripStatus = bus.tripStatus || deriveBusStatusesFromDocument(bus).tripStatus;
+        if (
+            currentTripStatus === TRIP_STATUS.ON_TRIP ||
+            currentTripStatus === TRIP_STATUS.DELAYED
+        ) {
+            throw new Error(
+                'Route change blocked: bus is currently ON_TRIP or DELAYED. End, complete, or cancel the current trip first, then retry route reassignment.'
+            );
+        }
+
         bus.routeId = route._id as any;
         applyRouteAssignmentStatus(bus);
         await syncBusDerivedStatuses(bus, { persist: true });

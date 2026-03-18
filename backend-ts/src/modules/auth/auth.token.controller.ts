@@ -5,7 +5,12 @@ import { setAuthCookies, clearAuthCookies } from '../../utils/cookies';
 import { User } from '../user/user.model';
 import { Driver } from '../driver/driver.model';
 import { Bus } from '../bus/bus.model';
-import { deriveBusStatusesFromDocument, setBusTripLifecycleFromEvent, syncBusDerivedStatuses } from '../bus/bus.status.workflow';
+import {
+    applyRouteAssignmentStatus,
+    deriveBusStatusesFromDocument,
+    setBusTripLifecycleFromEvent,
+    syncBusDerivedStatuses,
+} from '../bus/bus.status.workflow';
 import { TRIP_STATUS } from '../../constants/busStatus';
 
 export const refreshTokenController = async (req: Request, res: Response): Promise<void> => {
@@ -91,6 +96,8 @@ export const logoutDriverController = async (req: Request, res: Response): Promi
                             at: bus.lastUpdated,
                         });
                     }
+
+                    applyRouteAssignmentStatus(bus);
 
                     await syncBusDerivedStatuses(bus, {
                         persist: true,
