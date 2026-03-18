@@ -8,6 +8,8 @@ import {
     syncBusDerivedStatuses,
 } from '../bus/bus.status.workflow';
 import { FLEET_STATUS, TRIP_STATUS } from '../../constants/busStatus';
+import { buildEtaSnapshot } from '../../utils/eta';
+import { calculateDistanceMeters } from '../../utils/calculateDistance';
 
 const formatBusSnapshot = (bus: any) => {
     if (!bus) {
@@ -101,6 +103,79 @@ export const driverService = {
             routeId: route._id,
         }).sort({ sequenceOrder: 1 });
 
+        const normalizedStops = stops.map((stop) => ({
+            id: String(stop._id),
+            name: stop.name,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+            sequenceOrder: stop.sequenceOrder,
+            radiusMeters: stop.radiusMeters,
+        }));
+
+        const START_END_MERGE_RADIUS_METERS = 120;
+        const hasStartStop = normalizedStops.some(
+            (stop) =>
+                calculateDistanceMeters(stop.latitude, stop.longitude, route.startLat, route.startLng) <=
+                START_END_MERGE_RADIUS_METERS
+        );
+        const hasEndStop = normalizedStops.some(
+            (stop) =>
+                calculateDistanceMeters(stop.latitude, stop.longitude, route.endLat, route.endLng) <=
+                START_END_MERGE_RADIUS_METERS
+        );
+
+        const firstSequence = normalizedStops.length > 0 ? normalizedStops[0].sequenceOrder : 1;
+        const lastSequence =
+            normalizedStops.length > 0
+                ? normalizedStops[normalizedStops.length - 1].sequenceOrder
+                : firstSequence + 1;
+
+        const stopsForEta = [...normalizedStops];
+
+        if (!hasStartStop) {
+            stopsForEta.push({
+                id: `start-${String(route._id)}`,
+                name: route.startName || 'Start',
+                latitude: route.startLat,
+                longitude: route.startLng,
+                sequenceOrder: firstSequence - 1,
+                radiusMeters: 100,
+            });
+        }
+
+        if (!hasEndStop) {
+            stopsForEta.push({
+                id: `end-${String(route._id)}`,
+                name: route.endName || 'Destination',
+                latitude: route.endLat,
+                longitude: route.endLng,
+                sequenceOrder: lastSequence + 1,
+                radiusMeters: 100,
+            });
+        }
+
+        const hasLiveCoordinates =
+            typeof bus.currentLat === 'number' &&
+            typeof bus.currentLng === 'number' &&
+            Number.isFinite(bus.currentLat) &&
+            Number.isFinite(bus.currentLng) &&
+            (bus.currentLat !== 0 || bus.currentLng !== 0);
+
+        const eta = buildEtaSnapshot({
+            current: {
+                latitude: hasLiveCoordinates ? bus.currentLat : route.startLat,
+                longitude: hasLiveCoordinates ? bus.currentLng : route.startLng,
+            },
+            route: {
+                totalDistanceMeters: route.totalDistanceMeters,
+                estimatedDurationSeconds: route.estimatedDurationSeconds,
+                endLat: route.endLat,
+                endLng: route.endLng,
+                polyline: route.polyline || route.encodedPolyline,
+            },
+            stops: stopsForEta,
+        });
+
         return {
             bus: {
                 id: String(bus._id),
@@ -111,17 +186,17 @@ export const driverService = {
                 name: route.name,
                 encodedPolyline: route.encodedPolyline,
                 totalDistanceMeters: route.totalDistanceMeters,
+                totalDistanceText: eta.routeDistanceText,
                 estimatedDurationSeconds: route.estimatedDurationSeconds,
+                estimatedDurationText: eta.routeDurationText,
+                etaToDestinationSeconds: eta.etaToDestinationSeconds,
+                etaToDestinationText: eta.etaToDestinationText,
+                distanceToDestinationMeters: eta.distanceToDestinationMeters,
+                distanceToDestinationText: eta.distanceToDestinationText,
+                averageSpeedKmph: eta.averageSpeedKmph,
                 isActive: route.isActive,
             },
-            stops: stops.map((stop) => ({
-                id: String(stop._id),
-                name: stop.name,
-                latitude: stop.latitude,
-                longitude: stop.longitude,
-                sequenceOrder: stop.sequenceOrder,
-                radiusMeters: stop.radiusMeters,
-            })),
+            stops: eta.stopsWithEta,
         };
     },
 

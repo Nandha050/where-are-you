@@ -7,8 +7,10 @@ const getMessage = (error: unknown): string =>
 export const routeController = {
     createRoute: async (req: Request, res: Response): Promise<void> => {
         try {
-            const { name, startLat, startLng, endLat, endLng } = req.body as {
+            const { name, startName, endName, startLat, startLng, endLat, endLng } = req.body as {
                 name: string;
+                startName?: string;
+                endName?: string;
                 startLat: number;
                 startLng: number;
                 endLat: number;
@@ -22,6 +24,8 @@ export const routeController = {
 
             const route = await routeService.createRoute(req.user.organizationId, {
                 name,
+                startName,
+                endName,
                 startLat,
                 startLng,
                 endLat,

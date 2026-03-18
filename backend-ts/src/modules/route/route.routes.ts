@@ -11,6 +11,8 @@ export const routeRouter = Router();
 const createRouteSchema = z.object({
     body: z.object({
         name: z.string().min(1, 'name is required'),
+        startName: z.string().min(1, 'startName is required').optional(),
+        endName: z.string().min(1, 'endName is required').optional(),
         startLat: z.number({ error: 'startLat must be a number' }),
         startLng: z.number({ error: 'startLng must be a number' }),
         endLat: z.number({ error: 'endLat must be a number' }),
@@ -22,6 +24,8 @@ const updateRouteSchema = z.object({
     body: z
         .object({
             name: z.string().min(1, 'name must not be empty').optional(),
+            startName: z.string().min(1, 'startName must not be empty').optional(),
+            endName: z.string().min(1, 'endName must not be empty').optional(),
             startLat: z.number({ error: 'startLat must be a number' }).optional(),
             startLng: z.number({ error: 'startLng must be a number' }).optional(),
             endLat: z.number({ error: 'endLat must be a number' }).optional(),

@@ -3,6 +3,8 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface IRoute extends Document {
     organizationId: mongoose.Types.ObjectId;
     name: string;
+    startName: string;
+    endName: string;
     startLat: number;
     startLng: number;
     endLat: number;
@@ -25,6 +27,8 @@ const RouteSchema = new Schema<IRoute>(
     {
         organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', required: true, index: true },
         name: { type: String, required: true },
+        startName: { type: String, default: 'Start' },
+        endName: { type: String, default: 'Destination' },
         startLat: { type: Number, required: true },
         startLng: { type: Number, required: true },
         endLat: { type: Number, required: true },
