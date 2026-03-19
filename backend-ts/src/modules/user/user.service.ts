@@ -5,8 +5,8 @@ import { Bus } from '../bus/bus.model';
 import { Route } from '../route/route.model';
 import { Stop } from '../stop/stop.model';
 import { BusSubscription } from '../busSubscription/busSubscription.model';
-import { deriveBusStatusesFromDocument } from '../bus/bus.status.workflow';
 import { buildEtaSnapshot } from '../../utils/eta';
+import { tripService } from '../trip/trip.service';
 
 const toObjectId = (id: string) => new mongoose.Types.ObjectId(id);
 
@@ -18,16 +18,13 @@ const formatUser = (user: InstanceType<typeof User>) => ({
     createdAt: user.createdAt,
 });
 
-const formatBusForClient = (bus: any) => {
-    const statuses = deriveBusStatusesFromDocument(bus);
-
+const formatBusForClient = (bus: any, activeTrip: any) => {
     return {
         id: String(bus._id),
         numberPlate: bus.numberPlate,
-        fleetStatus: statuses.fleetStatus,
-        tripStatus: statuses.tripStatus,
-        trackingStatus: statuses.trackingStatus,
-        status: statuses.status,
+        status: bus.status,
+        tripStatus: activeTrip?.status || null,
+        activeTrip: activeTrip || null,
         currentLat: bus.currentLat,
         currentLng: bus.currentLng,
         lastUpdated: bus.lastUpdated,
@@ -89,9 +86,14 @@ export const userService = {
             .sort({ numberPlate: 1 })
             .limit(25);
 
+        const tripByBusId = await tripService.getActiveTripByBusIds(
+            organizationId,
+            buses.map((bus) => String(bus._id))
+        );
+
         return buses.map((bus) => {
             const route = bus.routeId as any;
-            const busPayload = formatBusForClient(bus);
+            const busPayload = formatBusForClient(bus, tripByBusId.get(String(bus._id)));
 
             return {
                 ...busPayload,
@@ -116,6 +118,8 @@ export const userService = {
         if (!bus) {
             throw new Error('Bus not found');
         }
+
+        const activeTrip = await tripService.getActiveTripByBusId(String(bus._id), organizationId);
 
         const route = bus.routeId as any;
         const stops = route
@@ -158,7 +162,7 @@ export const userService = {
 
         return {
             bus: {
-                ...formatBusForClient(bus),
+                ...formatBusForClient(bus, activeTrip),
                 routeId: route ? String(route._id) : null,
                 routeName: route?.name || null,
             },
@@ -285,10 +289,17 @@ export const userService = {
         })
             .populate(
                 'busId',
-                'numberPlate status fleetStatus tripStatus trackingStatus currentLat currentLng lastUpdated routeId'
+                'numberPlate status currentLat currentLng lastUpdated routeId'
             )
             .populate('stopId', 'name latitude longitude sequenceOrder radiusMeters')
             .sort({ createdAt: -1 });
+
+        const busIds = subscriptions
+            .map((subscription) => subscription.busId as any)
+            .filter(Boolean)
+            .map((bus) => String(bus._id || bus));
+
+        const tripByBusId = await tripService.getActiveTripByBusIds(organizationId, busIds);
 
         return subscriptions.map((subscription) => {
             const bus = subscription.busId as any;
@@ -297,7 +308,7 @@ export const userService = {
             return {
                 id: String(subscription._id),
                 bus: bus
-                    ? formatBusForClient(bus)
+                    ? formatBusForClient(bus, tripByBusId.get(String(bus._id)))
                     : null,
                 stop: stop
                     ? {

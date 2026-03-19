@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
 import { busService } from './bus.service';
-import { busMaintenanceSchema, busTripEventSchema, createBusSchema } from './bus.validation';
+import { createBusSchema } from './bus.validation';
 import { ZodError } from 'zod';
-import { TripStatus } from '../../constants/busStatus';
 
 const getMessage = (error: unknown): string => {
     if (error instanceof Error) {
@@ -131,122 +130,30 @@ export const busController = {
             }
 
             const { busId } = req.params as { busId: string };
-            const { routeName } = req.body as { routeName?: string };
+            const { routeName, routeId } = req.body as { routeName?: string; routeId?: string };
+            const normalizedRouteName = routeName?.trim();
+            const normalizedRouteId = routeId?.trim();
 
-            if (!routeName || routeName.trim().length === 0) {
-                res.status(400).json({ message: 'routeName is required' });
+            if (!normalizedRouteName && !normalizedRouteId) {
+                res.status(400).json({ message: 'routeName or routeId is required' });
                 return;
             }
 
             const bus = await busService.updateRouteForBus(
                 req.user.organizationId,
                 busId,
-                routeName.trim()
+                {
+                    routeName: normalizedRouteName,
+                    routeId: normalizedRouteId,
+                }
             );
 
             res.status(200).json({ bus });
         } catch (error) {
             const msg = error instanceof Error ? error.message : 'Something went wrong';
-            if (msg.startsWith('Route change blocked:')) {
-                res.status(409).json({
-                    message: msg,
-                    action: 'complete_or_cancel_trip_then_retry',
-                });
-                return;
-            }
-
             const status = msg === 'Bus not found' || msg.includes('Route') ? 404 : 400;
             res.status(status).json({ message: msg });
         }
     },
 
-    setBusMaintenanceMode: async (req: Request, res: Response): Promise<void> => {
-        try {
-            if (!req.user?.organizationId) {
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
-
-            const { busId } = req.params as { busId: string };
-            const { maintenanceMode } = busMaintenanceSchema.parse(req.body);
-
-            const bus = await busService.setMaintenanceMode(
-                req.user.organizationId,
-                busId,
-                maintenanceMode
-            );
-
-            res.status(200).json({ bus });
-        } catch (error) {
-            if (error instanceof ZodError) {
-                res.status(400).json({ message: getValidationErrors(error) });
-                return;
-            }
-
-            const message = getMessage(error);
-            res.status(message === 'Bus not found' ? 404 : 400).json({ message });
-        }
-    },
-
-    applyTripEvent: async (req: Request, res: Response): Promise<void> => {
-        try {
-            if (!req.user?.organizationId) {
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
-
-            const { busId } = req.params as { busId: string };
-            const payload = busTripEventSchema.parse(req.body);
-
-            const eventAt = payload.eventAt ? new Date(payload.eventAt) : undefined;
-
-            let bus;
-
-            if (payload.eventType === 'transition') {
-                if (!payload.nextTripStatus) {
-                    res.status(400).json({ message: 'nextTripStatus is required for transition events' });
-                    return;
-                }
-
-                bus = await busService.transitionTripStatus(
-                    req.user.organizationId,
-                    busId,
-                    payload.nextTripStatus as TripStatus,
-                    {
-                        routeRemoved: payload.routeRemoved,
-                        delayMinutes: payload.delayMinutes,
-                        eventAt,
-                    }
-                );
-            } else if (payload.eventType === 'trip_delayed') {
-                if (typeof payload.delayMinutes !== 'number') {
-                    res.status(400).json({ message: 'delayMinutes is required for trip_delayed event' });
-                    return;
-                }
-
-                bus = await busService.markTripEvent(req.user.organizationId, busId, {
-                    type: 'trip_delayed',
-                    delayMinutes: payload.delayMinutes,
-                    at: eventAt,
-                });
-            } else {
-                const eventType = payload.eventType;
-                bus = await busService.markTripEvent(req.user.organizationId, busId, {
-                    type: eventType,
-                    at: eventAt,
-                });
-            }
-
-            res.status(200).json({ bus });
-        } catch (error) {
-            if (error instanceof ZodError) {
-                res.status(400).json({ message: getValidationErrors(error) });
-                return;
-            }
-
-            const message = getMessage(error);
-            const statusCode = message === 'Bus not found' ? 404 : 400;
-            res.status(statusCode).json({ message });
-        }
-    },
 };

@@ -12,6 +12,4 @@ busRouter.get('/', requireAuth, requireRole(ROLES.ADMIN), busController.getBuses
 busRouter.get('/:busId', requireAuth, requireRole(ROLES.ADMIN), busController.getBusById);
 busRouter.put('/:busId/driver', requireAuth, requireRole(ROLES.ADMIN), busController.updateBusDriver);
 busRouter.put('/:busId/route', requireAuth, requireRole(ROLES.ADMIN), busController.updateBusRoute);
-busRouter.patch('/:busId/maintenance', requireAuth, requireRole(ROLES.ADMIN), busController.setBusMaintenanceMode);
-busRouter.post('/:busId/trip-events', requireAuth, requireRole(ROLES.ADMIN), busController.applyTripEvent);
 busRouter.delete('/:busId', requireAuth, requireRole(ROLES.ADMIN), busController.deleteBus);

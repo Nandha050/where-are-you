@@ -16,6 +16,11 @@ export const initSocket = (server: HttpServer): Server => {
 					return;
 				}
 
+				if (ENV.NODE_ENV !== 'production') {
+					callback(null, true);
+					return;
+				}
+
 				if (ENV.FRONTEND_URLS.length === 0 || ENV.FRONTEND_URLS.includes(origin)) {
 					callback(null, true);
 					return;

@@ -25,14 +25,15 @@ export const driverController = {
     },
     getMyDetails: async (req: Request, res: Response): Promise<void> => {
         try {
-            if (!req.user?.sub) {
+            if (!req.user?.sub || !req.user.organizationId) {
                 res.status(401).json({ message: 'Unauthorized' });
                 return;
             }
 
-            const details = await driverService.getMyDetails(req.user.sub);
+            const details = await driverService.getMyDetails(req.user.sub, req.user.organizationId);
 
-            res.status(200).json({ driver: details });
+            // Keep both contracts during migration: top-level payload and nested `driver` payload.
+            res.status(200).json({ ...details, driver: details });
         } catch (error) {
             res.status(400).json({ message: getMessage(error) });
         }
@@ -40,12 +41,12 @@ export const driverController = {
 
     getMyBus: async (req: Request, res: Response): Promise<void> => {
         try {
-            if (!req.user?.sub) {
+            if (!req.user?.sub || !req.user.organizationId) {
                 res.status(401).json({ message: 'Unauthorized' });
                 return;
             }
 
-            const bus = await driverService.getMyBus(req.user.sub);
+            const bus = await driverService.getMyBus(req.user.sub, req.user.organizationId);
 
             res.status(200).json({ bus });
         } catch (error) {
@@ -61,12 +62,12 @@ export const driverController = {
 
     getMyRoute: async (req: Request, res: Response): Promise<void> => {
         try {
-            if (!req.user?.sub) {
+            if (!req.user?.sub || !req.user.organizationId) {
                 res.status(401).json({ message: 'Unauthorized' });
                 return;
             }
 
-            const data = await driverService.getMyRoute(req.user.sub);
+            const data = await driverService.getMyRoute(req.user.sub, req.user.organizationId);
 
             res.status(200).json(data);
         } catch (error) {

@@ -2,22 +2,9 @@ import { Bus } from './bus.model';
 import { Driver } from '../driver/driver.model';
 import { Route } from '../route/route.model';
 import { CreateBusInput } from './bus.validation';
-import {
-    FLEET_STATUS,
-    LEGACY_BUS_STATUS,
-    TRIP_STATUS,
-    TRIP_STATUS_VALUES,
-    TripStatus,
-} from '../../constants/busStatus';
-import { TRACKING_STATUS } from '../../constants/trackingStatus';
-import {
-    applyMaintenanceModeStatus,
-    applyRouteAssignmentStatus,
-    deriveBusStatusesFromDocument,
-    setBusTripLifecycleFromEvent,
-    syncBusDerivedStatuses,
-    transitionBusTripStatus,
-} from './bus.status.workflow';
+import { BUS_LIFECYCLE_STATUS } from '../../constants/busLifecycle';
+import { logger } from '../../utils/logger';
+import { tripService } from '../trip/trip.service';
 
 const getRouteDetails = (routeRef: unknown): { routeId: string | null; routeName: string | null } => {
     if (!routeRef) {
@@ -33,8 +20,7 @@ const getRouteDetails = (routeRef: unknown): { routeId: string | null; routeName
     };
 };
 
-const buildBusPayload = (bus: any) => {
-    const derivedStatuses = deriveBusStatusesFromDocument(bus);
+const buildBusPayload = (bus: any, activeTrip?: any) => {
     const driver = bus.driverId as any;
     const route = getRouteDetails(bus.routeId);
 
@@ -51,14 +37,13 @@ const buildBusPayload = (bus: any) => {
         driverId: bus.driverId ? String((bus.driverId as any)._id || bus.driverId) : null,
         routeId: route.routeId,
         routeName: route.routeName,
-        fleetStatus: derivedStatuses.fleetStatus,
-        tripStatus: derivedStatuses.tripStatus,
-        trackingStatus: derivedStatuses.trackingStatus,
-        status: derivedStatuses.status,
+        status: bus.status,
         currentLat: bus.currentLat,
         currentLng: bus.currentLng,
         currentSpeedMps: bus.currentSpeedMps,
         lastUpdated: bus.lastUpdated,
+        tripStatus: activeTrip?.status || null,
+        activeTrip: activeTrip || null,
     };
 };
 
@@ -97,6 +82,41 @@ const resolveDriverForAssignment = async (
     throw new Error('memberId or driverId is required');
 };
 
+const resolveRouteForAssignment = async (
+    organizationId: string,
+    input: { routeName?: string; routeId?: string }
+) => {
+    const routeId = input.routeId?.trim();
+    const routeName = input.routeName?.trim();
+
+    if (routeId) {
+        const routeById = await Route.findOne({ _id: routeId, organizationId });
+        if (routeById) {
+            return routeById;
+        }
+
+        const crossOrgRoute = await Route.findById(routeId).select('_id organizationId name');
+        if (crossOrgRoute) {
+            throw new Error(
+                `Route '${routeId}' belongs to a different organization. Use a route from this organization or login to the matching org.`
+            );
+        }
+
+        throw new Error(`Route with id '${routeId}' not found`);
+    }
+
+    if (routeName) {
+        const routeByName = await Route.findOne({ organizationId, name: routeName });
+        if (!routeByName) {
+            throw new Error(`Route with name '${routeName}' not found`);
+        }
+
+        return routeByName;
+    }
+
+    return null;
+};
+
 export const busService = {
     createBus: async (organizationId: string, input: CreateBusInput) => {
         const existingBus = await Bus.findOne({
@@ -108,21 +128,33 @@ export const busService = {
             throw new Error('Bus with this number plate already exists in your organization');
         }
 
+        const route = await resolveRouteForAssignment(organizationId, {
+            routeId: input.routeId,
+            routeName: input.routeName,
+        });
+
         const bus = await Bus.create({
             organizationId,
             numberPlate: input.numberPlate,
             driverId: (input.driverId || null) as any,
-            status: LEGACY_BUS_STATUS.INACTIVE,
-            fleetStatus: FLEET_STATUS.OUT_OF_SERVICE,
-            tripStatus: TRIP_STATUS.NOT_SCHEDULED,
-            trackingStatus: TRACKING_STATUS.NO_SIGNAL,
-            maintenanceMode: false,
-            trackerOnline: true,
+            routeId: route?._id as any,
+            status: BUS_LIFECYCLE_STATUS.INACTIVE,
+            lastUpdated: new Date(),
         });
 
-        await syncBusDerivedStatuses(bus, { persist: true });
+        const payload = buildBusPayload(
+            route
+                ? {
+                    ...bus.toObject(),
+                    routeId: {
+                        _id: route._id,
+                        name: route.name,
+                    },
+                }
+                : bus
+        );
 
-        return buildBusPayload(bus);
+        return payload;
     },
 
     getBusesByOrganization: async (organizationId: string) => {
@@ -130,7 +162,12 @@ export const busService = {
             .populate('driverId', 'name memberId')
             .populate('routeId', 'name');
 
-        return buses.map(buildBusPayload);
+        const tripByBusId = await tripService.getActiveTripByBusIds(
+            organizationId,
+            buses.map((bus) => String(bus._id))
+        );
+
+        return buses.map((bus) => buildBusPayload(bus, tripByBusId.get(String(bus._id))));
     },
 
     getBusById: async (organizationId: string, busId: string) => {
@@ -145,7 +182,8 @@ export const busService = {
             throw new Error('Bus not found');
         }
 
-        return buildBusPayload(bus);
+        const activeTrip = await tripService.getActiveTripByBusId(busId, organizationId);
+        return buildBusPayload(bus, activeTrip);
     },
 
     updateBusDriver: async (
@@ -164,16 +202,44 @@ export const busService = {
 
         const driver = await resolveDriverForAssignment(organizationId, input);
 
-        // Remove previous driver from this bus
-        if (bus.driverId) {
+        logger.info('[BusAssignment] Assignment requested', {
+            organizationId,
+            busId,
+            requestedDriverId: String(driver._id),
+            requestedDriverMemberId: driver.memberId,
+        });
+
+        const existingBusForDriver = await Bus.findOne({
+            organizationId,
+            driverId: driver._id,
+            _id: { $ne: bus._id },
+        });
+
+        if (existingBusForDriver) {
+            existingBusForDriver.driverId = null;
+            await existingBusForDriver.save();
+            logger.warn('[BusAssignment] Detached driver from previous bus', {
+                organizationId,
+                driverId: String(driver._id),
+                previousBusId: String(existingBusForDriver._id),
+            });
+        }
+
+        if (bus.driverId && String(bus.driverId) !== String(driver._id)) {
             await Driver.findByIdAndUpdate(bus.driverId, { assignedBusId: null });
         }
 
         bus.driverId = driver._id as any;
         await bus.save();
 
-        // Update new driver with assigned bus
         await Driver.findByIdAndUpdate(driver._id, { assignedBusId: busId });
+
+        logger.info('[BusAssignment] Assignment completed', {
+            organizationId,
+            busId,
+            driverId: String(driver._id),
+            driverMemberId: driver.memberId,
+        });
 
         const payload = buildBusPayload(bus);
         return {
@@ -197,30 +263,31 @@ export const busService = {
         return { message: 'Bus deleted successfully' };
     },
 
-    updateRouteForBus: async (organizationId: string, busId: string, routeName: string) => {
+    updateRouteForBus: async (
+        organizationId: string,
+        busId: string,
+        routeInput: { routeName?: string; routeId?: string }
+    ) => {
         const bus = await Bus.findOne({ _id: busId, organizationId });
         if (!bus) {
             throw new Error('Bus not found');
         }
 
-        const route = await Route.findOne({ organizationId, name: routeName });
+        const route = await resolveRouteForAssignment(organizationId, routeInput);
         if (!route) {
-            throw new Error(`Route with name '${routeName}' not found`);
+            throw new Error('routeName or routeId is required');
         }
 
-        const currentTripStatus = bus.tripStatus || deriveBusStatusesFromDocument(bus).tripStatus;
-        if (
-            currentTripStatus === TRIP_STATUS.ON_TRIP ||
-            currentTripStatus === TRIP_STATUS.DELAYED
-        ) {
-            throw new Error(
-                'Route change blocked: bus is currently ON_TRIP or DELAYED. End, complete, or cancel the current trip first, then retry route reassignment.'
-            );
-        }
+        logger.info('[BusAssignment] Route assignment requested', {
+            organizationId,
+            busId,
+            routeId: String(route._id),
+            routeName: route.name,
+        });
 
         bus.routeId = route._id as any;
-        applyRouteAssignmentStatus(bus);
-        await syncBusDerivedStatuses(bus, { persist: true });
+        bus.lastUpdated = new Date();
+        await bus.save();
 
         const payload = buildBusPayload({
             ...bus.toObject(),
@@ -230,56 +297,13 @@ export const busService = {
             },
         });
 
+        logger.info('[BusAssignment] Route assignment completed', {
+            organizationId,
+            busId,
+            routeId: String(route._id),
+            routeName: route.name,
+        });
+
         return payload;
-    },
-
-    setMaintenanceMode: async (organizationId: string, busId: string, maintenanceMode: boolean) => {
-        const bus = await Bus.findOne({ _id: busId, organizationId });
-        if (!bus) {
-            throw new Error('Bus not found');
-        }
-
-        applyMaintenanceModeStatus(bus, maintenanceMode);
-        await syncBusDerivedStatuses(bus, { persist: true });
-        return buildBusPayload(bus);
-    },
-
-    transitionTripStatus: async (
-        organizationId: string,
-        busId: string,
-        nextTripStatus: TripStatus,
-        options?: { routeRemoved?: boolean; delayMinutes?: number; eventAt?: Date }
-    ) => {
-        if (!TRIP_STATUS_VALUES.includes(nextTripStatus)) {
-            throw new Error(`Invalid trip status '${nextTripStatus}'`);
-        }
-
-        const bus = await Bus.findOne({ _id: busId, organizationId });
-        if (!bus) {
-            throw new Error('Bus not found');
-        }
-
-        transitionBusTripStatus(bus, nextTripStatus, options);
-        await syncBusDerivedStatuses(bus, { persist: true });
-        return buildBusPayload(bus);
-    },
-
-    markTripEvent: async (
-        organizationId: string,
-        busId: string,
-        event:
-            | { type: 'trip_started'; at?: Date }
-            | { type: 'trip_completed'; at?: Date }
-            | { type: 'trip_cancelled'; at?: Date }
-            | { type: 'trip_delayed'; at?: Date; delayMinutes: number }
-    ) => {
-        const bus = await Bus.findOne({ _id: busId, organizationId });
-        if (!bus) {
-            throw new Error('Bus not found');
-        }
-
-        setBusTripLifecycleFromEvent(bus, event);
-        await syncBusDerivedStatuses(bus, { persist: true });
-        return buildBusPayload(bus);
     },
 };

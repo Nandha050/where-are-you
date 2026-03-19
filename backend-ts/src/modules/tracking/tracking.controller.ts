@@ -53,7 +53,8 @@ export const trackingController = {
 			const statusCode =
 				message === 'Driver not found' ||
 					message === 'No bus assigned to this driver' ||
-					message === 'Assigned bus not found'
+					message === 'Assigned bus not found' ||
+					message === 'No active trip found for this driver'
 					? 404
 					: 400;
 

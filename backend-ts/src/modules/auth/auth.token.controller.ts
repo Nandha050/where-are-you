@@ -4,14 +4,7 @@ import { generateTokens } from '../../utils/generateTokens';
 import { setAuthCookies, clearAuthCookies } from '../../utils/cookies';
 import { User } from '../user/user.model';
 import { Driver } from '../driver/driver.model';
-import { Bus } from '../bus/bus.model';
-import {
-    applyRouteAssignmentStatus,
-    deriveBusStatusesFromDocument,
-    setBusTripLifecycleFromEvent,
-    syncBusDerivedStatuses,
-} from '../bus/bus.status.workflow';
-import { TRIP_STATUS } from '../../constants/busStatus';
+import { tripService } from '../trip/trip.service';
 
 export const refreshTokenController = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -70,44 +63,13 @@ export const logoutUserController = async (req: Request, res: Response): Promise
 export const logoutDriverController = async (req: Request, res: Response): Promise<void> => {
     try {
         if (req.user?.sub && req.user.organizationId) {
-            const driver = await Driver.findOneAndUpdate(
+            await Driver.findOneAndUpdate(
                 { _id: req.user.sub, organizationId: req.user.organizationId },
                 { isTracking: false },
                 { new: true }
             );
 
-            if (driver?.assignedBusId) {
-                const bus = await Bus.findOne({
-                    _id: driver.assignedBusId,
-                    organizationId: req.user.organizationId,
-                });
-
-                if (bus) {
-                    bus.trackerOnline = false;
-                    bus.lastUpdated = new Date();
-
-                    const statuses = deriveBusStatusesFromDocument(bus);
-                    if (
-                        statuses.tripStatus === TRIP_STATUS.ON_TRIP ||
-                        statuses.tripStatus === TRIP_STATUS.DELAYED
-                    ) {
-                        setBusTripLifecycleFromEvent(bus, {
-                            type: 'trip_completed',
-                            at: bus.lastUpdated,
-                        });
-                    }
-
-                    applyRouteAssignmentStatus(bus);
-
-                    await syncBusDerivedStatuses(bus, {
-                        persist: true,
-                        latestTelemetry: {
-                            timestamp: bus.lastUpdated,
-                            speedMps: bus.currentSpeedMps,
-                        },
-                    });
-                }
-            }
+            await tripService.completeActiveTripForDriver(req.user.sub, req.user.organizationId);
         }
 
         clearAuthCookies(res);
