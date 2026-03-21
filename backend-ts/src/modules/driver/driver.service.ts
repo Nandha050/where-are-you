@@ -6,6 +6,7 @@ import { buildEtaSnapshot } from '../../utils/eta';
 import { calculateDistanceMeters } from '../../utils/calculateDistance';
 import { logger } from '../../utils/logger';
 import { tripService } from '../trip/trip.service';
+import { hashPassword } from '../../utils/hashPassword';
 
 const formatBusSnapshot = (bus: any, activeTrip: any) => {
     if (!bus) {
@@ -105,16 +106,113 @@ const resolveAssignedBusForDriver = async (driver: any) => {
 };
 
 export const driverService = {
-    listDriversByOrganization: async (organizationId: string) => {
-        const drivers = await Driver.find({ organizationId })
-            .select('_id name memberId')
+    listDriversByOrganization: async (organizationId: string, search?: string) => {
+        const query = search?.trim();
+        const drivers = await Driver.find({
+            organizationId,
+            ...(query
+                ? {
+                    $or: [
+                        { name: { $regex: query, $options: 'i' } },
+                        { memberId: { $regex: query, $options: 'i' } },
+                        { email: { $regex: query, $options: 'i' } },
+                        { phone: { $regex: query, $options: 'i' } },
+                    ],
+                }
+                : {}),
+        })
+            .select('_id name memberId email phone assignedBusId')
             .sort({ name: 1 });
 
         return drivers.map((driver) => ({
             id: String(driver._id),
             name: driver.name,
             memberId: driver.memberId,
+            email: driver.email || null,
+            phone: driver.phone || null,
+            assignedBusId: driver.assignedBusId ? String(driver.assignedBusId) : null,
         }));
+    },
+
+    updateDriverByAdmin: async (
+        organizationId: string,
+        driverId: string,
+        input: { name?: string; memberId?: string; email?: string; phone?: string; password?: string }
+    ) => {
+        const driver = await Driver.findOne({ _id: driverId, organizationId });
+
+        if (!driver) {
+            throw new Error('Driver not found');
+        }
+
+        if (input.memberId && input.memberId !== driver.memberId) {
+            const duplicate = await Driver.findOne({
+                organizationId,
+                memberId: input.memberId,
+                _id: { $ne: driverId },
+            });
+
+            if (duplicate) {
+                throw new Error('memberId already in use');
+            }
+        }
+
+        const normalizedEmail = input.email?.trim().toLowerCase();
+        if (normalizedEmail && normalizedEmail !== driver.email) {
+            const duplicate = await Driver.findOne({
+                organizationId,
+                email: normalizedEmail,
+                _id: { $ne: driverId },
+            });
+            if (duplicate) {
+                throw new Error('email already in use');
+            }
+        }
+
+        const normalizedPhone = input.phone?.trim();
+        if (normalizedPhone && normalizedPhone !== driver.phone) {
+            const duplicate = await Driver.findOne({
+                organizationId,
+                phone: normalizedPhone,
+                _id: { $ne: driverId },
+            });
+            if (duplicate) {
+                throw new Error('phone already in use');
+            }
+        }
+
+        const updates: Record<string, unknown> = {};
+        if (input.name) updates.name = input.name.trim();
+        if (input.memberId) updates.memberId = input.memberId.trim();
+        if (input.email !== undefined) updates.email = normalizedEmail || null;
+        if (input.phone !== undefined) updates.phone = normalizedPhone || null;
+        if (input.password) updates.passwordHash = await hashPassword(input.password);
+
+        const updated = await Driver.findByIdAndUpdate(driverId, { $set: updates }, { new: true });
+
+        return {
+            id: String(updated!._id),
+            name: updated!.name,
+            memberId: updated!.memberId,
+            email: updated!.email || null,
+            phone: updated!.phone || null,
+            assignedBusId: updated!.assignedBusId ? String(updated!.assignedBusId) : null,
+        };
+    },
+
+    deleteDriverByAdmin: async (organizationId: string, driverId: string) => {
+        const driver = await Driver.findOneAndDelete({ _id: driverId, organizationId });
+
+        if (!driver) {
+            throw new Error('Driver not found');
+        }
+
+        await Bus.updateMany(
+            { organizationId, driverId: driver._id },
+            { $set: { driverId: null } }
+        );
+
+        return { message: 'Driver deleted successfully' };
     },
 
     getMyDetails: async (driverId: string, organizationId: string) => {
@@ -145,6 +243,8 @@ export const driverService = {
             id: String(driver._id),
             name: driver.name,
             memberId: driver.memberId,
+            email: driver.email || null,
+            phone: driver.phone || null,
             organizationId: String(driver.organizationId),
             assignedBus: busSnapshot,
             bus: busSnapshot,

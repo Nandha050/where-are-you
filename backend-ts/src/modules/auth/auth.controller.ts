@@ -13,9 +13,15 @@ const getMessage = (error: unknown): string => {
 export const authController = {
 	signupAdmin: async (req: Request, res: Response): Promise<void> => {
 		try {
-			const { name, organizationName, email, password } = req.body as SignupAdminInput;
+			const { name, organizationName, organizationSlug, email, password } = req.body as SignupAdminInput;
 
-			const data = await authService.signupAdmin({ name, organizationName, email, password });
+			const data = await authService.signupAdmin({
+				name,
+				organizationName,
+				organizationSlug,
+				email,
+				password,
+			});
 
 			// Set HTTP-only cookies
 			setAuthCookies(res, data.accessToken, data.refreshToken);
@@ -70,14 +76,20 @@ export const authController = {
 
 	createUserByAdmin: async (req: Request, res: Response): Promise<void> => {
 		try {
-			const { name, memberId, password } = req.body as CreateMemberInput;
+			const { name, memberId, email, phone, password } = req.body as CreateMemberInput;
 
 			if (!req.user?.organizationId) {
 				res.status(401).json({ message: 'Unauthorized' });
 				return;
 			}
 
-			const user = await authService.createUserByAdmin(req.user.organizationId, { name, memberId, password });
+			const user = await authService.createUserByAdmin(req.user.organizationId, {
+				name,
+				memberId,
+				email,
+				phone,
+				password,
+			});
 
 			res.status(201).json({ user });
 		} catch (error) {
@@ -87,14 +99,20 @@ export const authController = {
 
 	createDriverByAdmin: async (req: Request, res: Response): Promise<void> => {
 		try {
-			const { name, memberId, password } = req.body as CreateMemberInput;
+			const { name, memberId, email, phone, password } = req.body as CreateMemberInput;
 
 			if (!req.user?.organizationId) {
 				res.status(401).json({ message: 'Unauthorized' });
 				return;
 			}
 
-			const driver = await authService.createDriverByAdmin(req.user.organizationId, { name, memberId, password });
+			const driver = await authService.createDriverByAdmin(req.user.organizationId, {
+				name,
+				memberId,
+				email,
+				phone,
+				password,
+			});
 
 			res.status(201).json({ driver });
 		} catch (error) {

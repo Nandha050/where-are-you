@@ -11,21 +11,25 @@ export const stopRouter = Router();
 const createStopSchema = z.object({
     body: z.object({
         name: z.string().min(1, 'name is required'),
-        latitude: z.number({ error: 'latitude must be a number' }),
-        longitude: z.number({ error: 'longitude must be a number' }),
-        sequenceOrder: z.number({ error: 'sequenceOrder must be a number' }).int('sequenceOrder must be an integer').min(1, 'sequenceOrder must be at least 1'),
-        radiusMeters: z.number().positive('radiusMeters must be positive').optional(),
+        latitude: z.coerce.number({ error: 'latitude must be a number' }),
+        longitude: z.coerce.number({ error: 'longitude must be a number' }),
+        sequenceOrder: z.coerce.number({ error: 'sequenceOrder must be a number' }).int('sequenceOrder must be an integer').min(1, 'sequenceOrder must be at least 1'),
+        radiusMeters: z.coerce.number().positive('radiusMeters must be positive').optional(),
     }),
 });
 
 const updateStopSchema = z.object({
-    body: z.object({
-        name: z.string().min(1).optional(),
-        latitude: z.number().optional(),
-        longitude: z.number().optional(),
-        sequenceOrder: z.number().int().min(1).optional(),
-        radiusMeters: z.number().positive().optional(),
-    }),
+    body: z
+        .object({
+            name: z.string().min(1).optional(),
+            latitude: z.coerce.number().optional(),
+            longitude: z.coerce.number().optional(),
+            sequenceOrder: z.coerce.number().int().min(1).optional(),
+            radiusMeters: z.coerce.number().positive().optional(),
+        })
+        .refine((value) => Object.keys(value).length > 0, {
+            message: 'At least one field is required',
+        }),
 });
 
 stopRouter.use(requireAuth, requireRole(ROLES.ADMIN));

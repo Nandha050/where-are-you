@@ -8,7 +8,8 @@ export const userController = {
     getUsers: async (req: Request, res: Response): Promise<void> => {
         try {
             if (!req.user?.organizationId) { res.status(401).json({ message: 'Unauthorized' }); return; }
-            const users = await userService.getUsers(req.user.organizationId);
+            const query = typeof req.query.q === 'string' ? req.query.q : undefined;
+            const users = await userService.getUsers(req.user.organizationId, query);
             res.status(200).json({ users });
         } catch (error) {
             res.status(500).json({ message: getMessage(error) });

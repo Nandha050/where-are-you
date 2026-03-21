@@ -13,10 +13,10 @@ const createRouteSchema = z.object({
         name: z.string().min(1, 'name is required'),
         startName: z.string().min(1, 'startName is required').optional(),
         endName: z.string().min(1, 'endName is required').optional(),
-        startLat: z.number({ error: 'startLat must be a number' }),
-        startLng: z.number({ error: 'startLng must be a number' }),
-        endLat: z.number({ error: 'endLat must be a number' }),
-        endLng: z.number({ error: 'endLng must be a number' }),
+        startLat: z.coerce.number({ error: 'startLat must be a number' }),
+        startLng: z.coerce.number({ error: 'startLng must be a number' }),
+        endLat: z.coerce.number({ error: 'endLat must be a number' }),
+        endLng: z.coerce.number({ error: 'endLng must be a number' }),
     }),
 });
 
@@ -26,10 +26,10 @@ const updateRouteSchema = z.object({
             name: z.string().min(1, 'name must not be empty').optional(),
             startName: z.string().min(1, 'startName must not be empty').optional(),
             endName: z.string().min(1, 'endName must not be empty').optional(),
-            startLat: z.number({ error: 'startLat must be a number' }).optional(),
-            startLng: z.number({ error: 'startLng must be a number' }).optional(),
-            endLat: z.number({ error: 'endLat must be a number' }).optional(),
-            endLng: z.number({ error: 'endLng must be a number' }).optional(),
+            startLat: z.coerce.number({ error: 'startLat must be a number' }).optional(),
+            startLng: z.coerce.number({ error: 'startLng must be a number' }).optional(),
+            endLat: z.coerce.number({ error: 'endLat must be a number' }).optional(),
+            endLng: z.coerce.number({ error: 'endLng must be a number' }).optional(),
             isActive: z.boolean().optional(),
         })
         .refine((value) => Object.keys(value).length > 0, {

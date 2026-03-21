@@ -10,6 +10,7 @@ import { hashPassword } from '../../utils/hashPassword';
 interface AdminSignupInput {
 	name: string;
 	organizationName: string;
+	organizationSlug: string;
 	email: string;
 	password: string;
 }
@@ -23,36 +24,26 @@ interface MemberLoginInput {
 	role: 'user' | 'driver';
 	memberId: string;
 	password: string;
-	organizationSlug?: string;
+	organizationSlug: string;
 }
 
 interface CreateMemberInput {
 	name: string;
 	memberId: string;
+	email?: string;
+	phone?: string;
 	password: string;
 }
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+const normalizePhone = (phone: string): string => phone.trim();
 
-const createBaseSlug = (organizationName: string): string => {
-	return organizationName
+const normalizeOrganizationSlug = (organizationSlug: string): string => {
+	return organizationSlug
 		.trim()
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '') || 'organization';
-};
-
-const generateUniqueOrganizationSlug = async (organizationName: string): Promise<string> => {
-	const baseSlug = createBaseSlug(organizationName);
-	let slugCandidate = baseSlug;
-	let counter = 1;
-
-	while (await Organization.exists({ slug: slugCandidate })) {
-		counter += 1;
-		slugCandidate = `${baseSlug}-${counter}`;
-	}
-
-	return slugCandidate;
 };
 
 export const authService = {
@@ -63,7 +54,12 @@ export const authService = {
 			throw new Error('Admin email already exists');
 		}
 
-		const slug = await generateUniqueOrganizationSlug(input.organizationName);
+		const slug = normalizeOrganizationSlug(input.organizationSlug);
+
+		if (await Organization.exists({ slug })) {
+			throw new Error('Organization ID already exists. Please choose another one');
+		}
+
 		const organization = await Organization.create({
 			name: input.organizationName.trim(),
 			slug,
@@ -142,55 +138,20 @@ export const authService = {
 	},
 
 	loginMember: async (input: MemberLoginInput) => {
+		const organizationSlug = normalizeOrganizationSlug(input.organizationSlug);
+		const organization = await Organization.findOne({ slug: organizationSlug });
+
+		if (!organization) {
+			throw new Error('Organization not found');
+		}
+
 		if (input.role === ROLES.USER) {
-			if (input.organizationSlug) {
-				const organization = await Organization.findOne({ slug: input.organizationSlug });
+			const user = await User.findOne({
+				organizationId: organization._id,
+				memberId: input.memberId,
+			});
 
-				if (!organization) {
-					throw new Error('Organization not found');
-				}
-
-				const user = await User.findOne({
-					organizationId: organization._id,
-					memberId: input.memberId,
-				});
-
-				if (!user || !(await comparePassword(input.password, user.passwordHash))) {
-					throw new Error('Invalid credentials');
-				}
-
-				const { accessToken, refreshToken } = generateTokens({
-					sub: String(user._id),
-					organizationId: String(user.organizationId),
-					role: ROLES.USER,
-				});
-
-				return {
-					accessToken,
-					refreshToken,
-					member: {
-						id: String(user._id),
-						role: ROLES.USER,
-						name: user.name,
-						memberId: user.memberId,
-					},
-				};
-			}
-
-			const users = await User.find({ memberId: input.memberId }).limit(2);
-
-			if (users.length === 0) {
-				throw new Error('Invalid credentials');
-			}
-
-			if (users.length > 1) {
-				throw new Error('Multiple accounts found. Please provide organizationSlug');
-			}
-
-			const user = users[0];
-			const passwordValid = await comparePassword(input.password, user.passwordHash);
-
-			if (!passwordValid) {
+			if (!user || !(await comparePassword(input.password, user.passwordHash))) {
 				throw new Error('Invalid credentials');
 			}
 
@@ -212,54 +173,12 @@ export const authService = {
 			};
 		}
 
-		if (input.organizationSlug) {
-			const organization = await Organization.findOne({ slug: input.organizationSlug });
+		const driver = await Driver.findOne({
+			organizationId: organization._id,
+			memberId: input.memberId,
+		});
 
-			if (!organization) {
-				throw new Error('Organization not found');
-			}
-
-			const driver = await Driver.findOne({
-				organizationId: organization._id,
-				memberId: input.memberId,
-			});
-
-			if (!driver || !(await comparePassword(input.password, driver.passwordHash))) {
-				throw new Error('Invalid credentials');
-			}
-
-			const { accessToken, refreshToken } = generateTokens({
-				sub: String(driver._id),
-				organizationId: String(driver.organizationId),
-				role: ROLES.DRIVER,
-			});
-
-			return {
-				accessToken,
-				refreshToken,
-				member: {
-					id: String(driver._id),
-					role: ROLES.DRIVER,
-					name: driver.name,
-					memberId: driver.memberId,
-				},
-			};
-		}
-
-		const drivers = await Driver.find({ memberId: input.memberId }).limit(2);
-
-		if (drivers.length === 0) {
-			throw new Error('Invalid credentials');
-		}
-
-		if (drivers.length > 1) {
-			throw new Error('Multiple accounts found. Please provide organizationSlug');
-		}
-
-		const driver = drivers[0];
-		const passwordValid = await comparePassword(input.password, driver.passwordHash);
-
-		if (!passwordValid) {
+		if (!driver || !(await comparePassword(input.password, driver.passwordHash))) {
 			throw new Error('Invalid credentials');
 		}
 
@@ -282,6 +201,9 @@ export const authService = {
 	},
 
 	createUserByAdmin: async (organizationId: string, input: CreateMemberInput) => {
+		const normalizedEmail = input.email ? normalizeEmail(input.email) : undefined;
+		const normalizedPhone = input.phone ? normalizePhone(input.phone) : undefined;
+
 		const existingUser = await User.findOne({
 			organizationId,
 			memberId: input.memberId,
@@ -291,10 +213,32 @@ export const authService = {
 			throw new Error('User memberId already exists');
 		}
 
+		if (normalizedEmail) {
+			const duplicateEmail = await User.findOne({
+				organizationId,
+				email: normalizedEmail,
+			});
+			if (duplicateEmail) {
+				throw new Error('User email already exists');
+			}
+		}
+
+		if (normalizedPhone) {
+			const duplicatePhone = await User.findOne({
+				organizationId,
+				phone: normalizedPhone,
+			});
+			if (duplicatePhone) {
+				throw new Error('User phone already exists');
+			}
+		}
+
 		const user = await User.create({
 			organizationId,
 			name: input.name.trim(),
 			memberId: input.memberId.trim(),
+			email: normalizedEmail,
+			phone: normalizedPhone,
 			passwordHash: await hashPassword(input.password),
 		});
 
@@ -302,10 +246,15 @@ export const authService = {
 			id: String(user._id),
 			name: user.name,
 			memberId: user.memberId,
+			email: user.email || null,
+			phone: user.phone || null,
 		};
 	},
 
 	createDriverByAdmin: async (organizationId: string, input: CreateMemberInput) => {
+		const normalizedEmail = input.email ? normalizeEmail(input.email) : undefined;
+		const normalizedPhone = input.phone ? normalizePhone(input.phone) : undefined;
+
 		const existingDriver = await Driver.findOne({
 			organizationId,
 			memberId: input.memberId,
@@ -315,10 +264,32 @@ export const authService = {
 			throw new Error('Driver memberId already exists');
 		}
 
+		if (normalizedEmail) {
+			const duplicateEmail = await Driver.findOne({
+				organizationId,
+				email: normalizedEmail,
+			});
+			if (duplicateEmail) {
+				throw new Error('Driver email already exists');
+			}
+		}
+
+		if (normalizedPhone) {
+			const duplicatePhone = await Driver.findOne({
+				organizationId,
+				phone: normalizedPhone,
+			});
+			if (duplicatePhone) {
+				throw new Error('Driver phone already exists');
+			}
+		}
+
 		const driver = await Driver.create({
 			organizationId,
 			name: input.name.trim(),
 			memberId: input.memberId.trim(),
+			email: normalizedEmail,
+			phone: normalizedPhone,
 			passwordHash: await hashPassword(input.password),
 		});
 
@@ -326,6 +297,8 @@ export const authService = {
 			id: String(driver._id),
 			name: driver.name,
 			memberId: driver.memberId,
+			email: driver.email || null,
+			phone: driver.phone || null,
 		};
 	},
 };

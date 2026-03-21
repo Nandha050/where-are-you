@@ -6,6 +6,7 @@ import { Route } from '../route/route.model';
 import { Stop } from '../stop/stop.model';
 import { BusSubscription } from '../busSubscription/busSubscription.model';
 import { buildEtaSnapshot } from '../../utils/eta';
+import { calculateDistanceMeters } from '../../utils/calculateDistance';
 import { tripService } from '../trip/trip.service';
 
 const toObjectId = (id: string) => new mongoose.Types.ObjectId(id);
@@ -14,6 +15,8 @@ const formatUser = (user: InstanceType<typeof User>) => ({
     id: String(user._id),
     name: user.name,
     memberId: user.memberId,
+    email: user.email || null,
+    phone: user.phone || null,
     organizationId: String(user.organizationId),
     createdAt: user.createdAt,
 });
@@ -32,8 +35,21 @@ const formatBusForClient = (bus: any, activeTrip: any) => {
 };
 
 export const userService = {
-    getUsers: async (organizationId: string) => {
-        const users = await User.find({ organizationId: toObjectId(organizationId) }).sort({ createdAt: -1 });
+    getUsers: async (organizationId: string, search?: string) => {
+        const query = search?.trim();
+        const users = await User.find({
+            organizationId: toObjectId(organizationId),
+            ...(query
+                ? {
+                    $or: [
+                        { name: { $regex: query, $options: 'i' } },
+                        { memberId: { $regex: query, $options: 'i' } },
+                        { email: { $regex: query, $options: 'i' } },
+                        { phone: { $regex: query, $options: 'i' } },
+                    ],
+                }
+                : {}),
+        }).sort({ createdAt: -1 });
         return users.map(formatUser);
     },
 
@@ -46,7 +62,7 @@ export const userService = {
     updateUser: async (
         organizationId: string,
         userId: string,
-        input: { name?: string; memberId?: string; password?: string }
+        input: { name?: string; memberId?: string; email?: string; phone?: string; password?: string }
     ) => {
         const user = await User.findOne({ _id: toObjectId(userId), organizationId: toObjectId(organizationId) });
         if (!user) throw new Error('User not found');
@@ -60,9 +76,31 @@ export const userService = {
             if (duplicate) throw new Error('memberId already in use');
         }
 
+        const normalizedEmail = input.email?.trim().toLowerCase();
+        if (normalizedEmail && normalizedEmail !== user.email) {
+            const duplicate = await User.findOne({
+                organizationId: toObjectId(organizationId),
+                email: normalizedEmail,
+                _id: { $ne: toObjectId(userId) },
+            });
+            if (duplicate) throw new Error('email already in use');
+        }
+
+        const normalizedPhone = input.phone?.trim();
+        if (normalizedPhone && normalizedPhone !== user.phone) {
+            const duplicate = await User.findOne({
+                organizationId: toObjectId(organizationId),
+                phone: normalizedPhone,
+                _id: { $ne: toObjectId(userId) },
+            });
+            if (duplicate) throw new Error('phone already in use');
+        }
+
         const updates: Record<string, unknown> = {};
         if (input.name) updates.name = input.name.trim();
         if (input.memberId) updates.memberId = input.memberId.trim();
+        if (input.email !== undefined) updates.email = normalizedEmail || null;
+        if (input.phone !== undefined) updates.phone = normalizedPhone || null;
         if (input.password) updates.passwordHash = await hashPassword(input.password);
 
         const updated = await User.findByIdAndUpdate(userId, { $set: updates }, { new: true });
@@ -136,6 +174,61 @@ export const userService = {
             Number.isFinite(bus.currentLng) &&
             (bus.currentLat !== 0 || bus.currentLng !== 0);
 
+        const normalizedStops = stops.map((stop) => ({
+            id: String(stop._id),
+            name: stop.name,
+            latitude: stop.latitude,
+            longitude: stop.longitude,
+            sequenceOrder: stop.sequenceOrder,
+            radiusMeters: stop.radiusMeters,
+        }));
+
+        const START_END_MERGE_RADIUS_METERS = 120;
+        const hasStartStop =
+            !!route &&
+            normalizedStops.some(
+                (stop) =>
+                    calculateDistanceMeters(stop.latitude, stop.longitude, route.startLat, route.startLng) <=
+                    START_END_MERGE_RADIUS_METERS
+            );
+        const hasEndStop =
+            !!route &&
+            normalizedStops.some(
+                (stop) =>
+                    calculateDistanceMeters(stop.latitude, stop.longitude, route.endLat, route.endLng) <=
+                    START_END_MERGE_RADIUS_METERS
+            );
+
+        const firstSequence = normalizedStops.length > 0 ? normalizedStops[0].sequenceOrder : 1;
+        const lastSequence =
+            normalizedStops.length > 0
+                ? normalizedStops[normalizedStops.length - 1].sequenceOrder
+                : firstSequence + 1;
+
+        const stopsForEta = [...normalizedStops];
+
+        if (route && !hasStartStop) {
+            stopsForEta.push({
+                id: `start-${String(route._id)}`,
+                name: route.startName || 'Start',
+                latitude: route.startLat,
+                longitude: route.startLng,
+                sequenceOrder: firstSequence - 1,
+                radiusMeters: 100,
+            });
+        }
+
+        if (route && !hasEndStop) {
+            stopsForEta.push({
+                id: `end-${String(route._id)}`,
+                name: route.endName || 'Destination',
+                latitude: route.endLat,
+                longitude: route.endLng,
+                sequenceOrder: lastSequence + 1,
+                radiusMeters: 100,
+            });
+        }
+
         const eta = route
             ? buildEtaSnapshot({
                 current: {
@@ -149,14 +242,7 @@ export const userService = {
                     endLng: route.endLng,
                     polyline: route.polyline || route.encodedPolyline,
                 },
-                stops: stops.map((stop) => ({
-                    id: String(stop._id),
-                    name: stop.name,
-                    latitude: stop.latitude,
-                    longitude: stop.longitude,
-                    sequenceOrder: stop.sequenceOrder,
-                    radiusMeters: stop.radiusMeters,
-                })),
+                stops: stopsForEta,
             })
             : null;
 
@@ -170,6 +256,8 @@ export const userService = {
                 ? {
                     id: String(route._id),
                     name: route.name,
+                    startName: route.startName || 'Start',
+                    endName: route.endName || 'Destination',
                     startLat: route.startLat,
                     startLng: route.startLng,
                     endLat: route.endLat,
@@ -188,14 +276,7 @@ export const userService = {
                 : null,
             stops:
                 eta?.stopsWithEta ||
-                stops.map((stop) => ({
-                    id: String(stop._id),
-                    name: stop.name,
-                    latitude: stop.latitude,
-                    longitude: stop.longitude,
-                    sequenceOrder: stop.sequenceOrder,
-                    radiusMeters: stop.radiusMeters,
-                })),
+                stopsForEta,
         };
     },
 

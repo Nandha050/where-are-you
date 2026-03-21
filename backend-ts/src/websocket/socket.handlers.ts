@@ -12,6 +12,7 @@ interface DriverLocationPayload {
 	latitude: number;
 	longitude: number;
 	speed?: number;
+	heading?: number;
 	timestamp?: string;
 }
 
@@ -83,6 +84,10 @@ export const registerSocketHandlers = (socket: Socket): void => {
 				return;
 			}
 
+			if (typeof payload.heading !== 'undefined' && !isValidNumber(payload.heading)) {
+				return;
+			}
+
 			let recordedAt: Date | undefined;
 			if (typeof payload.timestamp === 'string' && payload.timestamp.trim().length > 0) {
 				recordedAt = new Date(payload.timestamp);
@@ -97,7 +102,8 @@ export const registerSocketHandlers = (socket: Socket): void => {
 				payload.latitude,
 				payload.longitude,
 				payload.speed,
-				recordedAt
+				recordedAt,
+				payload.heading
 			);
 
 			if (payload.busId && payload.busId.trim() && payload.busId.trim() !== updated.busId) {
