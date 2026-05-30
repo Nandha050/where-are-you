@@ -168,6 +168,8 @@ const emitBusLocationSafely = (params: {
             TRACKING_EVENTS.BUS_LOCATION_UPDATE,
             buildRealtimePayload(params)
         );
+        // Trace emit for debugging
+        console.log('[ROOM EMIT]', { roomId: getBusRoom(params.busId), event: TRACKING_EVENTS.BUS_LOCATION_UPDATE, socketId: io ? 'io' : 'no-io', timestamp: new Date().toISOString() });
     } catch (error) {
         const message = error instanceof Error ? error.message : 'socket emit failed';
         logger.warn(`[Tracking] socket emit skipped for bus=${params.busId}: ${message}`);

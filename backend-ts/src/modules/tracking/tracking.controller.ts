@@ -174,6 +174,9 @@ export const trackingController = {
 
 			const payload = validation.validated!;
 
+			// Short trace log when batch upload is received
+			console.log('[BATCH UPLOAD RECEIVED]', { driverId: payload.driverId, busId: payload.busId, tripId: payload.tripId, locations: payload.locations.length });
+
 			// Verify driverId matches JWT
 			if (payload.driverId !== req.user.sub) {
 				logger.warn(

@@ -2,7 +2,7 @@ import { Socket } from 'socket.io';
 import mongoose from 'mongoose';
 import { TRACKING_EVENTS } from '../modules/tracking/tracking.events';
 import { logger } from '../utils/logger';
-import { getBusRoom, getRouteRoom } from './socket.rooms';
+import { getBusRoom, getRouteRoom, getTripRoom } from './socket.rooms';
 import { ROLES } from '../constants/roles';
 import { Bus } from '../modules/bus/bus.model';
 import { Route } from '../modules/route/route.model';
@@ -74,8 +74,10 @@ export const registerSocketHandlers = (socket: Socket): void => {
 				return;
 			}
 
-			socket.join(getBusRoom(String(bus._id)));
-			logger.info(`Socket ${socket.id} joined bus room: ${getBusRoom(String(bus._id))}`);
+			const room = getBusRoom(String(bus._id));
+			socket.join(room);
+			console.log('[SOCKET ROOM JOIN]', { roomId: room, socketId: socket.id, timestamp: new Date().toISOString() });
+			logger.info(`Socket ${socket.id} joined bus room: ${room}`);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown socket error';
 			logger.warn(`joinBusRoom failed for socket ${socket.id}: ${message}`);
@@ -122,8 +124,10 @@ export const registerSocketHandlers = (socket: Socket): void => {
 				return;
 			}
 
-			socket.join(getRouteRoom(String(route._id)));
-			logger.info(`Socket ${socket.id} joined route room: ${getRouteRoom(String(route._id))}`);
+			const room = getRouteRoom(String(route._id));
+			socket.join(room);
+			console.log('[SOCKET ROOM JOIN]', { roomId: room, socketId: socket.id, timestamp: new Date().toISOString() });
+			logger.info(`Socket ${socket.id} joined route room: ${room}`);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown socket error';
 			logger.warn(`joinRouteRoom failed for socket ${socket.id}: ${message}`);
@@ -150,6 +154,43 @@ export const registerSocketHandlers = (socket: Socket): void => {
 	 * - Replay attack prevention (nonce)
 	 * - Rate limiting
 	 */
+
+	/**
+	 * Passenger/Admin joins trip room to receive location updates for a specific trip
+	 */
+	socket.on(TRACKING_EVENTS.JOIN_TRIP_ROOM, async (tripId: string) => {
+		try {
+			if (!socket.data.user) {
+				logger.warn(`joinTripRoom: No user data for socket ${socket.id}`);
+				return;
+			}
+
+			if (![ROLES.USER, ROLES.ADMIN].includes(socket.data.user.role)) {
+				logger.warn(
+					`joinTripRoom denied: socket=${socket.id}, role=${socket.data.user.role}`
+				);
+				return;
+			}
+
+			if (!tripId || typeof tripId !== 'string') {
+				return;
+			}
+
+			const trimmed = tripId.trim();
+			// basic validation for ObjectId
+			if (!mongoose.isValidObjectId(trimmed)) {
+				return;
+			}
+
+			const room = getTripRoom(trimmed);
+			socket.join(room);
+			console.log('[SOCKET ROOM JOIN]', { roomId: room, socketId: socket.id, timestamp: new Date().toISOString() });
+			logger.info(`Socket ${socket.id} joined trip room: ${room}`);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Unknown socket error';
+			logger.warn(`joinTripRoom failed for socket ${socket.id}: ${message}`);
+		}
+	});
 
 	socket.on('disconnect', () => {
 		logger.info(`Socket client disconnected: ${socket.id}`);

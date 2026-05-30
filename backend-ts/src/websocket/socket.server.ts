@@ -62,6 +62,7 @@ export const initSocket = (server: HttpServer): Server => {
 	});
 
 	io.on('connection', (socket) => {
+		console.log('[SOCKET CONNECTED]', { socketId: socket.id, role: socket.data.user?.role || 'unknown', timestamp: new Date().toISOString() });
 		logger.info(`Socket client connected: ${socket.id} (${socket.data.user?.role || 'unknown'})`);
 		registerSocketHandlers(socket);
 	});

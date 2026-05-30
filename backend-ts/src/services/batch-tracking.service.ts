@@ -291,6 +291,9 @@ export const batchTrackingService = {
 
             // Update Redis cache with latest location
             const latestLocation = validation.validLocations[validation.validLocations.length - 1];
+
+            // DB update log for tracing (after latestLocation is defined)
+            console.log('[DB UPDATE]', { busId: payload.busId, tripId: payload.tripId, lat: latestLocation.latitude, lng: latestLocation.longitude, insertedCount });
             const cacheData: CachedLocation = {
                 latitude: latestLocation.latitude,
                 longitude: latestLocation.longitude,
@@ -337,17 +340,21 @@ export const batchTrackingService = {
                 cachedLongitude: latestLocation.longitude,
             });
 
-            // Broadcast location to passengers
+            console.log('[GPS RECEIVED]', { busId: payload.busId, tripId: payload.tripId, lat: latestLocation.latitude, lng: latestLocation.longitude, timestamp: latestLocation.timestamp });
+
+            // Broadcast location to passengers (normalize to lat/lng)
             broadcastService.broadcastBusLocation(payload.tripId, {
                 busId: payload.busId,
                 tripId: payload.tripId,
+                lat: latestLocation.latitude,
+                lng: latestLocation.longitude,
                 latitude: latestLocation.latitude,
                 longitude: latestLocation.longitude,
                 speed: latestLocation.speed,
                 heading: latestLocation.heading,
                 accuracy: latestLocation.accuracy,
                 timestamp: latestLocation.timestamp,
-            });
+            } as any);
 
             // Mark nonce as processed
             await redisService.markNonceProcessed(payload.nonce);

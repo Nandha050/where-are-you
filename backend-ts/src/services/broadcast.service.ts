@@ -1,5 +1,7 @@
 import { getIO } from '../websocket/socket.server';
 import { logger } from '../utils/logger';
+import { TRACKING_EVENTS } from '../modules/tracking/tracking.events';
+import { getBusRoom, getTripRoom, getRouteRoom } from '../websocket/socket.rooms';
 
 export interface BusLocationBroadcast {
     busId: string;
@@ -40,9 +42,7 @@ export interface NotificationBroadcast {
     data?: Record<string, unknown>;
 }
 
-const getTripRoom = (tripId: string): string => `trip:${tripId}`;
-const getBusRoom = (busId: string): string => `bus:${busId}`;
-const getRouteRoom = (routeId: string): string => `route:${routeId}`;
+// room name helpers are imported from websocket/socket.rooms
 
 export const broadcastService = {
     /**
@@ -52,14 +52,34 @@ export const broadcastService = {
     broadcastBusLocation(tripId: string, locationData: BusLocationBroadcast): void {
         try {
             const io = getIO();
-            const room = getTripRoom(tripId);
 
-            io.to(room).emit('busLocationUpdate', {
-                ...locationData,
+            // Normalize payload to always include `lat` and `lng` keys (frontend expectation)
+            const lat = (locationData as any).lat ?? (locationData as any).latitude ?? locationData.latitude;
+            const lng = (locationData as any).lng ?? (locationData as any).longitude ?? locationData.longitude;
+
+            const payload = {
+                busId: locationData.busId,
+                tripId: locationData.tripId,
+                lat,
+                lng,
+                speed: locationData.speed,
+                heading: locationData.heading,
+                accuracy: locationData.accuracy,
+                timestamp: locationData.timestamp,
                 broadcastTimestamp: new Date().toISOString(),
-            });
+            };
 
-            logger.debug(`Broadcast location to trip room ${room}`);
+            // Emit to trip room
+            const tripRoom = getTripRoom(tripId);
+            io.to(tripRoom).emit(TRACKING_EVENTS.BUS_LOCATION_UPDATE, payload);
+            console.log('[ROOM EMIT]', { roomId: tripRoom, event: TRACKING_EVENTS.BUS_LOCATION_UPDATE, socketId: io ? 'io' : 'no-io', timestamp: new Date().toISOString() });
+            logger.debug(`Broadcast location to trip room ${tripRoom}`);
+
+            // Also emit to bus room in case clients joined by bus id
+            const busRoom = getBusRoom(locationData.busId);
+            io.to(busRoom).emit(TRACKING_EVENTS.BUS_LOCATION_UPDATE, payload);
+            console.log('[ROOM EMIT]', { roomId: busRoom, event: TRACKING_EVENTS.BUS_LOCATION_UPDATE, socketId: io ? 'io' : 'no-io', timestamp: new Date().toISOString() });
+            logger.debug(`Broadcast location to bus room ${busRoom}`);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             logger.warn(`Failed to broadcast location: ${message}`);

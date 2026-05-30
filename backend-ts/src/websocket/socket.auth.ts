@@ -89,11 +89,14 @@ export const authenticateSocket = (
             role: decoded.role,
         };
 
+        // Short console trace for socket auth
+        console.log('[SOCKET AUTH]', { authenticated: true, userId: decoded.sub, socketId: socket.id });
         logger.info(
             `Socket authenticated successfully: ${socket.id}, role=${decoded.role}`
         );
         next();
     } catch (_error) {
+        console.log('[SOCKET AUTH]', { authenticated: false, userId: null, socketId: socket.id });
         logger.warn(`Socket authentication failed (invalid/expired token): ${handshakeInfo}`);
         next(new Error('Unauthorized: invalid or expired token'));
     }
