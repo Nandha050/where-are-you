@@ -8,6 +8,9 @@ export const userAppRouter = Router();
 
 userAppRouter.use(requireAuth, requireRole(ROLES.USER));
 
+// PHASE 4: New endpoint for automatic route-based tracking
+userAppRouter.get('/tracking/active-trip', userAppController.getTrackingData);
+
 userAppRouter.get('/buses/search', userAppController.searchBuses);
 userAppRouter.get('/buses/:busId/live', userAppController.getLiveBus);
 

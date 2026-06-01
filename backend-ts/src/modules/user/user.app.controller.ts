@@ -132,4 +132,92 @@ export const userAppController = {
             res.status(message === 'User not found' ? 404 : 400).json({ message });
         }
     },
+
+    /**
+     * PHASE 4: Get passenger automatic tracking data
+     * New endpoint for auto passenger tracking flow
+     * 
+     * Flow:
+     * 1. User authenticated (token in header)
+     * 2. Get user's assigned route
+     * 3. Get active trip on that route
+     * 4. Return route + trip + bus + driver
+     * 5. Frontend joins socket trip room with tripId
+     * 
+     * Response:
+     * - No route assigned: return null values with message
+     * - Route exists, no active trip: return route + nulls (bus in parking)
+     * - Active trip: return all data ready for socket connection
+     */
+    getTrackingData: async (req: Request, res: Response): Promise<void> => {
+        try {
+            if (!req.user?.organizationId || !req.user.sub) {
+                res.status(401).json({ success: false, message: 'Unauthorized' });
+                return;
+            }
+
+            const trackingData = await userService.getPassengerTrackingData(
+                req.user.sub,
+                req.user.organizationId
+            );
+
+            // If user has no route assigned
+            if (!trackingData.route) {
+                res.status(400).json({
+                    success: false,
+                    message: trackingData.message,
+                    data: {
+                        route: null,
+                        stops: null,
+                        trip: null,
+                        bus: null,
+                        driver: null,
+                    },
+                });
+                return;
+            }
+
+            // If route exists but no active trip
+            if (!trackingData.trip) {
+                res.status(200).json({
+                    success: true,
+                    message: trackingData.message,
+                    data: {
+                        route: trackingData.route,
+                        stops: trackingData.stops,
+                        trip: null,
+                        bus: null,
+                        driver: null,
+                    },
+                });
+                return;
+            }
+
+            // If active trip exists, return all data
+            res.status(200).json({
+                success: true,
+                message: trackingData.message,
+                data: {
+                    route: trackingData.route,
+                    stops: trackingData.stops,
+                    trip: trackingData.trip,
+                    bus: trackingData.bus,
+                    driver: trackingData.driver,
+                },
+            });
+        } catch (error) {
+            const message = getMessage(error);
+            res.status(400).json({
+                success: false,
+                message,
+                data: {
+                    route: null,
+                    stops: null,
+                    trip: null,
+                    bus: null,
+                    driver: null,
+                },
+            });
+        }
+    },
 };

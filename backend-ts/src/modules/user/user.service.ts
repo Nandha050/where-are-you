@@ -8,6 +8,7 @@ import { BusSubscription } from '../busSubscription/busSubscription.model';
 import { buildEtaSnapshot } from '../../utils/eta';
 import { calculateDistanceMeters } from '../../utils/calculateDistance';
 import { tripService } from '../trip/trip.service';
+import { Trip } from '../trip/trip.model';
 import { ENV } from '../../config/env.config';
 
 const toObjectId = (id: string) => new mongoose.Types.ObjectId(id);
@@ -470,6 +471,105 @@ export const userService = {
             id: String(user._id),
             memberId: user.memberId,
             fcmToken: user.fcmToken,
+        };
+    },
+
+    /**
+     * PHASE 3: Get passenger automatic tracking data
+     * Flow:
+     * 1. Get authenticated user
+     * 2. Verify user has assigned route
+     * 3. Get active trip for that route
+     * 4. Return route + trip + bus + driver info
+     * 
+     * Used by: GET /api/user/tracking/active-trip
+     */
+    getPassengerTrackingData: async (userId: string, organizationId: string) => {
+        // Step 1: Get user with assigned route
+        const user = await User.findOne({
+            _id: toObjectId(userId),
+            organizationId: toObjectId(organizationId),
+        }).populate('routeId', 'name startName endName startLat startLng endLat endLng encodedPolyline totalDistanceMeters estimatedDurationSeconds');
+
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        // Step 2: Validate user has assigned route
+        const route = user.routeId as any;
+        if (!route) {
+            return {
+                success: true,
+                route: null,
+                trip: null,
+                bus: null,
+                driver: null,
+                stops: null,
+                message: 'No route assigned to this user',
+            };
+        }
+
+        // Step 3: Get all stops for this route (sorted by sequence)
+        const stops = await Stop.find({
+            routeId: route._id,
+            organizationId: toObjectId(organizationId),
+        }).sort({ sequenceOrder: 1 });
+
+        // Step 4: Get active trip for this route's bus
+        // Since one bus per route, find the active trip on this route
+        const trip = await Trip.findOne({
+            routeId: route._id,
+            organizationId: toObjectId(organizationId),
+            status: { $nin: ['COMPLETED', 'CANCELLED'] },
+        })
+            .sort({ createdAt: -1 })
+            .populate('busId', 'numberPlate status')
+            .populate('driverId', 'name memberId phone')
+            .populate('routeId', 'name startName endName');
+
+        // Step 5: Format and return response
+        return {
+            success: true,
+            route: route ? {
+                id: String(route._id),
+                name: route.name,
+                startName: route.startName || 'Start',
+                endName: route.endName || 'Destination',
+                startLat: route.startLat,
+                startLng: route.startLng,
+                endLat: route.endLat,
+                endLng: route.endLng,
+                encodedPolyline: route.encodedPolyline,
+                totalDistanceMeters: route.totalDistanceMeters,
+                estimatedDurationSeconds: route.estimatedDurationSeconds,
+            } : null,
+            stops: stops.length > 0 ? stops.map(stop => ({
+                id: String(stop._id),
+                name: stop.name,
+                latitude: stop.latitude,
+                longitude: stop.longitude,
+                sequenceOrder: stop.sequenceOrder,
+                radiusMeters: stop.radiusMeters,
+            })) : null,
+            trip: trip ? {
+                id: String(trip._id),
+                status: trip.status,
+                startedAt: trip.startedAt || null,
+                currentLocation: trip.currentLocation || null,
+                createdAt: trip.createdAt,
+            } : null,
+            bus: trip?.busId ? {
+                id: String((trip.busId as any)._id || trip.busId),
+                numberPlate: (trip.busId as any).numberPlate,
+                status: (trip.busId as any).status,
+            } : null,
+            driver: trip?.driverId ? {
+                id: String((trip.driverId as any)._id || trip.driverId),
+                name: (trip.driverId as any).name,
+                memberId: (trip.driverId as any).memberId,
+                phone: (trip.driverId as any).phone,
+            } : null,
+            message: trip ? 'Active trip found' : 'No active trip at the moment',
         };
     },
 };
