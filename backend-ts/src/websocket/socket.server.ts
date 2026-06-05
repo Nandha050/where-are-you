@@ -62,8 +62,25 @@ export const initSocket = (server: HttpServer): Server => {
 	});
 
 	io.on('connection', (socket) => {
-		console.log('[SOCKET CONNECTED]', { socketId: socket.id, role: socket.data.user?.role || 'unknown', timestamp: new Date().toISOString() });
-		logger.info(`Socket client connected: ${socket.id} (${socket.data.user?.role || 'unknown'})`);
+		console.log('[SOCKET CONNECTED]', {
+			socketId: socket.id,
+			role: socket.data.user?.role || 'unknown',
+			timestamp: new Date().toISOString()
+		});
+
+		// 🔥 ADD THIS
+		socket.onAny((event, ...args) => {
+			console.log('🔥 SOCKET EVENT RECEIVED', {
+				event,
+				args,
+				socketId: socket.id,
+			});
+		});
+
+		logger.info(
+			`Socket client connected: ${socket.id} (${socket.data.user?.role || 'unknown'})`
+		);
+
 		registerSocketHandlers(socket);
 	});
 

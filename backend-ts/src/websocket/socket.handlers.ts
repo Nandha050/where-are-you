@@ -159,6 +159,11 @@ export const registerSocketHandlers = (socket: Socket): void => {
 	 * Passenger/Admin joins trip room to receive location updates for a specific trip
 	 */
 	socket.on(TRACKING_EVENTS.JOIN_TRIP_ROOM, async (tripId: string) => {
+		console.log('🚨 JOIN_TRIP_ROOM HANDLER HIT', {
+			eventName: TRACKING_EVENTS.JOIN_TRIP_ROOM,
+			tripId,
+			socketId: socket.id,
+		});
 		try {
 			if (!socket.data.user) {
 				logger.warn(`joinTripRoom: No user data for socket ${socket.id}`);

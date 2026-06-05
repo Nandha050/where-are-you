@@ -1,120 +1,92 @@
-# Frontend Tracking Integration Guide
+# Frontend Tracking Integration
 
-## Overview
-Integrate the auto-tracking feature into the user/passenger app. Users will see their assigned route and active trip data automatically on app load.
+This file is the single frontend reference for integrating passenger tracking UI with the backend.
 
----
+## What the backend gives you
 
-## Phase 1: API Endpoints & Response Structure
+Use one bootstrap request on screen load:
 
-### Endpoint: Get User's Active Trip, Route & Stops
-```
-GET /api/user/tracking/active-trip
-Headers: Authorization: Bearer <user_token>
-Response Status: 200 (or 400 if no route assigned)
-```
+`GET /api/user/tracking/active-trip`
 
-**Single API call returns everything:**
-- Route details (polyline, distance, ETA)
-- All stops for the route (sorted by sequence)
-- Active trip data (if running)
-- Bus location & info
-- Driver info
+Headers:
+
+`Authorization: Bearer <user_token>`
+
+The response already includes everything needed for the tracking screen:
+
+- route
+- stops
+- trip
+- bus
+- driver
+
+### Response shapes
+
+No route assigned:
+
 ```json
 {
-  "success": true,
-  "message": "Active trip found" | "No active trip at the moment" | "No route assigned to this user",
+  "success": false,
+  "message": "No route assigned to this user",
   "data": {
-    "route": {
-      "id": "6a1be2a6806e253e3d340987",
-      "name": "srd-bvrit",
-      "startName": "srd",
-      "endName": "bvrit",
-      "startLat": 17.589228110339473,
-      "startLng": 78.08385921577023,
-      "endLat": 17.72747797745772,
-      "endLng": 78.25448117834576,
-      "encodedPolyline": "wkjjBwvq{M...",
-      "totalDistanceMeters": 30291,
-      "estimatedDurationSeconds": 3204
-    },
-    "stops": [
-      {
-        "id": "stop_1",
-        "name": "Main Station",
-        "latitude": 17.589228,
-        "longitude": 78.083859,
-        "sequenceOrder": 1,
-        "radiusMeters": 100
-      },
-      {
-        "id": "stop_2",
-        "name": "City Center",
-        "latitude": 17.650000,
-        "longitude": 78.150000,
-        "sequenceOrder": 2,
-        "radiusMeters": 100
-      }
-    ],
-    "trip": {
-      "id": "trip_id",
-      "status": "RUNNING", // PENDING | STARTED | RUNNING | STOPPED | COMPLETED | CANCELLED
-      "currentLat": 17.60,
-      "currentLng": 78.10,
-      "createdAt": "2026-05-31T10:00:00Z"
-    },
-    "bus": {
-      "id": "bus_id",
-      "numberPlate": "AP-12-XYZ-1234",
-      "currentLat": 17.60,
-      "currentLng": 78.10
-    },
-    "driver": {
-      "id": "driver_id",
-      "name": "John Doe",
-      "phone": "+91-9876543210"
-    }
+    "route": null,
+    "stops": null,
+    "trip": null,
+    "bus": null,
+    "driver": null
   }
 }
 ```
 
-**Response Scenarios:**
-1. **No route assigned** → status 400
-   ```json
-   {
-     "success": false,
-     "message": "No route assigned to this user",
-     "data": { "route": null, "stops": null, "trip": null, "bus": null, "driver": null }
-   }
-   ```
+Route exists, no active trip:
 
-2. **Route assigned, no active trip** → status 200
-   ```json
-   {
-     "success": true,
-     "message": "No active trip at the moment",
-     "data": { "route": {...}, "stops": [...], "trip": null, "bus": null, "driver": null }
-   }
-   ```
-
-3. **Active trip running** → status 200
-   ```json
-   {
-     "success": true,
-     "message": "Active trip found",
-     "data": { "route": {...}, "stops": [...], "trip": {...}, "bus": {...}, "driver": {...} }
-   }
-   ```
-
----
-
-## Phase 2: Frontend State Management
-
-### Redux/Zustand Store Structure
-```typescript
-// Tracking State
+```json
 {
-  // Route Data
+  "success": true,
+  "message": "No active trip at the moment",
+  "data": {
+    "route": { "id": "...", "name": "...", "encodedPolyline": "..." },
+    "stops": [
+      { "id": "...", "name": "Stop A", "latitude": 17.58, "longitude": 78.08, "sequenceOrder": 1, "radiusMeters": 100 }
+    ],
+    "trip": null,
+    "bus": null,
+    "driver": null
+  }
+}
+```
+
+Active trip running:
+
+```json
+{
+  "success": true,
+  "message": "Active trip found",
+  "data": {
+    "route": { "id": "...", "name": "...", "encodedPolyline": "..." },
+    "stops": [ ... ],
+    "trip": { "id": "...", "status": "RUNNING", "startedAt": "..." },
+    "bus": { "id": "...", "numberPlate": "AP-12-XYZ-1234" },
+    "driver": { "id": "...", "name": "John Doe", "phone": "+91-9876543210" }
+  }
+}
+```
+
+## Frontend flow
+
+1. User logs in and opens the tracking screen.
+2. Call `GET /api/user/tracking/active-trip` once.
+3. If `route` is null, show “No route assigned”.
+4. If `route` exists and `trip` is null, show route + stops + “Waiting for driver to start trip”.
+5. If `trip` exists, render the full map and connect realtime sockets.
+6. Keep route/stops/driver static in state, and update trip/bus coordinates live.
+
+## State model
+
+Use Redux, Zustand, or local component state with this shape:
+
+```typescript
+type TrackingState = {
   route: {
     id: string;
     name: string;
@@ -128,8 +100,6 @@ Response Status: 200 (or 400 if no route assigned)
     totalDistanceMeters: number;
     estimatedDurationSeconds: number;
   } | null;
-
-  // Stops
   stops: Array<{
     id: string;
     name: string;
@@ -138,266 +108,113 @@ Response Status: 200 (or 400 if no route assigned)
     sequenceOrder: number;
     radiusMeters: number;
   }> | null;
-
-  // Trip Data (changes frequently)
   trip: {
     id: string;
     status: 'PENDING' | 'STARTED' | 'RUNNING' | 'STOPPED' | 'COMPLETED' | 'CANCELLED';
-    currentLat: number;
-    currentLng: number;
-    createdAt: string;
+    startedAt: string | null;
+    currentLocation?: { latitude: number; longitude: number } | null;
   } | null;
-
-  // Bus Data (changes with trip)
   bus: {
     id: string;
     numberPlate: string;
-    currentLat: number;
-    currentLng: number;
+    status?: string | null;
   } | null;
-
-  // Driver Data
   driver: {
     id: string;
     name: string;
-    phone: string;
+    phone: string | null;
   } | null;
-
-  // UI State
   loading: boolean;
   error: string | null;
-  hasRoute: boolean;
-  hasActiveTrip: boolean;
-}
-```
-
----
-
-## Phase 3: Component Architecture
-
-### Main Tracking Screen Component
-```
-TrackingScreen/
-├── useTrackingData()          // Hook: fetch & manage tracking state
-├── MapContainer               // Show route polyline & bus/driver location
-├── TripInfoCard               // Show trip status, driver info
-├── StopsListPanel             // Show all stops in order
-├── DriverCard                 // Show driver name, phone, rating
-├── TripStatusBanner           // Show "Active Trip", "No Trip", etc.
-└── ErrorFallback              // Show "No route assigned"
-```
-
-### Key Components:
-
-**1. useTrackingData Hook**
-```typescript
-const useTrackingData = () => {
-  const dispatch = useDispatch();
-  const trackingState = useSelector(state => state.tracking);
-  
-  useEffect(() => {
-    // 1. Call GET /api/user/tracking/active-trip
-    // 2. If route exists and trip exists, load stops via GET /api/admin/routes/:routeId/stops
-    // 3. Update Redux store
-    // 4. Set up socket listener for live location (see Phase 5)
-  }, []);
-
-  return trackingState;
 };
 ```
 
-**2. MapContainer Component**
+## Socket contract
+
+Use the actual backend event names from the codebase:
+
+- `joinTrip` to subscribe to a trip room
+- `busLocationUpdate` to receive live movement
+- `joinBusRoom` and `joinRoute` also exist, but for this screen you usually need `joinTrip`
+
+Important backend detail:
+
+- There is no `LEAVE_TRIP_ROOM` handler on the backend right now.
+- On unmount, just remove listeners and disconnect the socket if you own the connection.
+
+### Recommended client flow
+
 ```typescript
-// Use Google Maps / Mapbox / Leaflet
-// Display:
-// - Route polyline (from encodedPolyline)
-// - Current bus location (trip.currentLat, trip.currentLng)
-// - All stops as markers
-// - User current location (optional)
-// - Distance to next stop
-```
+socket.emit('joinTrip', trip.id);
 
-**3. StopsListPanel Component**
-```typescript
-// Show stops in scrollable list
-// Mark current stop (closest to bus)
-// Show completed stops with checkmark
-// Show upcoming stops
-// Each stop shows: name, distance from bus
-```
-
-**4. TripStatusBanner Component**
-```typescript
-// Show trip status badge
-// Color: RUNNING = green, PENDING = blue, STOPPED = gray
-// Show ETA to destination
-// Show total distance remaining
-```
-
----
-
-## Phase 4: Integration Flow
-
-### On App Load (User Logs In)
-```
-1. User logs in → Get user token
-2. Call GET /api/user/tracking/active-trip with token (ONE CALL GETS EVERYTHING)
-3. Parse response:
-   - If no route: Show "No route assigned" message
-   - If route + no trip: Show route details + stops list, "Waiting for driver to start trip"
-   - If route + active trip: 
-     a. Load route on map
-     b. Show stops list (already in response)
-     c. Connect to Socket.io (see Phase 5)
-4. Store all data in Redux
-5. Render TrackingScreen component
-```
-
-### On Trip Status Change (Socket Event)
-```
-Listen for: trip_updated event
-Update Redux: trip status, trip location
-Refresh map marker position
-```
-
----
-
-## Phase 5: Socket.io Integration
-
-### Join Trip Room
-```typescript
-// After getting active trip from endpoint
-socket.emit('JOIN_TRIP_ROOM', {
-  tripId: trip.id
-});
-
-// Listen for live location updates
-socket.on('location_update', (data) => {
-  // data: { tripId, latitude, longitude, timestamp }
-  // Update Redux trip.currentLat/Lng
-  // Update map marker in real-time
-});
-
-// Listen for trip status changes
-socket.on('trip_status_changed', (data) => {
-  // data: { tripId, status, message }
-  // Update Redux trip.status
-  // Show notification if status changed to COMPLETED/CANCELLED
+socket.on('busLocationUpdate', (payload) => {
+  // payload shape depends on broadcaster, but you should at least expect:
+  // { tripId, busId, lat, lng, currentLat, currentLng, timestamp, status }
+  // Update trip/bus coordinates in state.
 });
 ```
 
-### Leave Trip Room
+## Hook structure
+
+Create one hook that owns the bootstrap fetch and socket subscription:
+
 ```typescript
-// On component unmount or when trip ends
-socket.emit('LEAVE_TRIP_ROOM', {
-  tripId: trip.id
-});
+export function useTrackingData() {
+  // 1. fetch /api/user/tracking/active-trip on mount
+  // 2. store route/stops/trip/bus/driver
+  // 3. if trip exists, connect socket and emit joinTrip
+  // 4. listen for busLocationUpdate and update live coordinates
+  // 5. clean up listeners on unmount
+}
 ```
 
----
+Suggested behavior:
 
-## Phase 6: Error Handling
+- Keep the first fetch separate from realtime updates.
+- Only open the socket when `trip.id` exists.
+- If the trip changes, re-join with the new trip id.
+- When status becomes `COMPLETED` or `CANCELLED`, stop updating the live map marker.
 
-### Network Errors
-```
-GET /api/user/tracking/active-trip fails
-→ Show retry button
-→ Log error
-→ Store error in Redux
-```
+## UI mapping
 
-### Validation Errors
-```
-Token invalid/expired
-→ Redirect to login
-→ Clear tracking data
-```
+Your existing screens can map directly to these states:
 
-### UI States
-```
-1. Loading: Show spinner while fetching
-2. No Route: Show onboarding screen "Awaiting route assignment"
-3. No Trip: Show route details, "Trip not started yet"
-4. Active Trip: Show full tracking UI
-5. Trip Ended: Show trip summary, "Trip completed"
-6. Error: Show error banner with retry
-```
+- Loading state: show skeleton or spinner.
+- No route state: show onboarding/assignment screen.
+- Route but no trip: show route, stops, and waiting banner.
+- Active trip: show map, trip banner, driver card, and stops list.
+- Error state: show retry button and preserve old state only if it is still valid.
 
----
+### Components you can wire up
 
-## Phase 7: Checklist for Frontend
+- `TrackingScreen`
+- `MapContainer`
+- `StopsListPanel`
+- `TripStatusBanner`
+- `DriverCard`
+- `ErrorFallback`
 
-- [ ] Set up Redux/Zustand store structure
-- [ ] Create useTrackingData hook
-- [ ] Create TrackingScreen component
-- [ ] Implement MapContainer (show route polyline)
-- [ ] Implement StopsListPanel
-- [ ] Implement TripStatusBanner
-- [ ] Implement DriverCard
-- [ ] Add Socket.io listeners (JOIN_TRIP_ROOM, location_update, trip_status_changed)
-- [ ] Handle all 3 response scenarios (no route, no trip, active trip)
-- [ ] Add error handling & retry logic
-- [ ] Test with real trip data
-- [ ] Optimize map performance (re-renders)
-- [ ] Add geolocation permission handling (if showing user location)
+## Implementation notes
 
----
+- The backend already returns sorted stops, so do not refetch stops separately for this flow.
+- Decode `route.encodedPolyline` with a polyline library before drawing the map line.
+- Use `trip.currentLocation` or the live socket coordinates as the map marker source.
+- Treat route and stops as mostly static until the user logs out or changes assignment.
+- Keep trip and bus coordinates in a fast-updating slice so the map can re-render without resetting the whole screen.
 
-## Phase 8: Testing Checklist
+## Minimal integration checklist
 
-### Test Case 1: No Route Assigned
-```
-Prerequisites: User without route assignment
-Expected: "No route assigned" message
-```
+- Fetch `/api/user/tracking/active-trip` on screen load.
+- Handle the three response cases: no route, no trip, active trip.
+- Join the socket room with `joinTrip` when a trip exists.
+- Listen for `busLocationUpdate` and update the marker in realtime.
+- Clean up listeners when the screen unmounts.
+- Show the correct UI state for loading, error, inactive, and active trip modes.
 
-### Test Case 2: Route Assigned, No Trip
-```
-Prerequisites: User with route, no active trip
-Expected: Route shown, stops listed, "Waiting for trip" message
-```
+## File references in backend
 
-### Test Case 3: Active Trip with Live Updates
-```
-Prerequisites: Active trip running
-Expected:
-1. Route + stops + trip displayed
-2. Driver location updates in real-time via socket
-3. Trip status updates when trip ends
-```
-
-### Test Case 4: Socket Disconnection
-```
-Prerequisites: Active trip, then disconnect socket
-Expected: Show "Connection lost" message, retry button
-```
-
-### Test Case 5: Switch Routes
-```
-Prerequisites: Log out and log in with different user
-Expected: Old route/trip cleared, new route loaded
-```
-
----
-
-## API Reference Summary
-
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `/api/user/tracking/active-trip` | GET | User Token | Get route + stops + trip + bus + driver (ONE CALL) |
-| Socket: `JOIN_TRIP_ROOM` | Event | User Token | Subscribe to live trip updates |
-| Socket: `location_update` | Event | - | Receive live bus location |
-| Socket: `trip_status_changed` | Event | - | Receive trip status updates |
-
----
-
-## Notes
-
-- ✅ **Single API call** - Get route, stops, trip, bus, driver all in one response
-- Stops are sorted by `sequenceOrder` (ascending order along the route)
-- Polyline is encoded using Google's polyline algorithm - use library to decode
-- All coordinates are in format: latitude, longitude
-- Trip status flow: PENDING → STARTED → RUNNING → STOPPED → COMPLETED/CANCELLED
-- Socket events broadcast to all users in trip room, not just driver
-- When user has no route assigned: response status is 400, but data structure still includes `stops: null`
-- When route exists but no trip: stops are returned, trip/bus/driver are null
+- Endpoint: [backend-ts/src/modules/user/user.app.routes.ts](backend-ts/src/modules/user/user.app.routes.ts#L12)
+- Controller: [backend-ts/src/modules/user/user.app.controller.ts](backend-ts/src/modules/user/user.app.controller.ts#L152)
+- Tracking response builder: [backend-ts/src/modules/user/user.service.ts](backend-ts/src/modules/user/user.service.ts#L487)
+- Socket events: [backend-ts/src/modules/tracking/tracking.events.ts](backend-ts/src/modules/tracking/tracking.events.ts#L1)
+- Socket handlers: [backend-ts/src/websocket/socket.handlers.ts](backend-ts/src/websocket/socket.handlers.ts#L1)

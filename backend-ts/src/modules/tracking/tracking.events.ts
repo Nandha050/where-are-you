@@ -1,7 +1,7 @@
 export const TRACKING_EVENTS = {
 	JOIN_BUS_ROOM: 'joinBusRoom',
 	JOIN_ROUTE_ROOM: 'joinRoute',
-	JOIN_TRIP_ROOM: 'joinTrip',
+	JOIN_TRIP_ROOM: 'joinTripRoom',
 	DRIVER_LOCATION_UPDATE: 'driverLocationUpdate',
 	BUS_LOCATION_UPDATE: 'busLocationUpdate',
 	STOP_UPDATE: 'stopUpdate',
