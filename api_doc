@@ -1892,6 +1892,38 @@ This document lists all available APIs from the backend system grouped logically
     }
     ```
 
+### Get My User Profile
+* **API**: `GET /api/user/profile`
+* **Description**: Retrieve detailed profile of the authenticated passenger/user including their registration details and FCM token.
+* **Authentication**: Bearer Token / Cookies (`user` role)
+* **Body**: None
+* **Response**: `200 OK`
+* **Example**:
+  * **Response**:
+    ```json
+    {
+      "success": true,
+      "id": "60d5ec4b1234567890123488",
+      "name": "Jane User",
+      "memberId": "USR-1002",
+      "email": "jane@transitorg.com",
+      "phone": "+919876543210",
+      "organizationId": "60d5ec4b1234567890123457",
+      "routeId": "60d5ec4b1234567890123499",
+      "routeName": "Downtown Express",
+      "stopId": "60d5ec4b1234567890123712",
+      "stopName": "Midpoint Junction",
+      "fcmToken": "fcm_device_token_string_example_123...",
+      "notificationPreferences": {
+        "tripStartedEnabled": true,
+        "busNearStopEnabled": true,
+        "busArrivedEnabled": true,
+        "delayAlertsEnabled": true
+      },
+      "createdAt": "2026-06-04T12:00:00.000Z"
+    }
+    ```
+
 ---
 
 ## 13. Push Notification & Device Management
@@ -1918,9 +1950,9 @@ This document lists all available APIs from the backend system grouped logically
     }
     ```
 
-### Update FCM Token (Alternative Call)
-* **API**: `PATCH /api/user/profile/fcm-token`
-* **Description**: Alternative patch API to set FCM device token for passengers.
+### Update FCM Token
+* **API**: `PATCH /api/user/profile/fcm-token` or `PUT /api/user/fcm-token` or `PUT /api/user/profile/fcm-token`
+* **Description**: Set FCM device token for passengers.
 * **Authentication**: Bearer Token / Cookies (`user` role)
 * **Body**:
   ```json
