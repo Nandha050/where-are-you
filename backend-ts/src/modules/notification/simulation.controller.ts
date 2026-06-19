@@ -145,6 +145,7 @@ export const simulationController = {
 						latitude: nearLat,
 						longitude: nearLng,
 						isBusStartedEvent: false,
+						timestamp: new Date(),
 					});
 
 					result.message = `Bus near stop notification triggered (simulated ~100m from ${stop.name})`;
@@ -176,6 +177,7 @@ export const simulationController = {
 						latitude: atLat,
 						longitude: atLng,
 						isBusStartedEvent: false,
+						timestamp: new Date(),
 					});
 
 					result.message = `Bus arrived notification triggered (simulated at ${arrStop.name})`;
