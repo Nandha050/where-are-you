@@ -25,6 +25,7 @@ import { paymentRouter } from './modules/payment/payment.routes';
 import { paymentWebhookRouter } from './modules/payment/payment.webhook.routes';
 import { simulationRouter } from './modules/notification/simulation.routes';
 import { locationRouter } from './modules/location/location.routes';
+import { initializeEmailQueue, initializeEmailScheduler, emailDebugRouter } from './services/email';
 
 const app = express();
 
@@ -129,6 +130,7 @@ app.use('/api/notifications', deviceTokenRoutes);
 app.use('/api/location', locationRouter);
 app.use('/api/debug', routeDebugRouter);
 app.use('/api/debug/notifications', simulationRouter);
+app.use('/api/debug/email', emailDebugRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -151,6 +153,19 @@ connectDB()
         } catch (error) {
             logger.warn('Redis initialization warning (non-critical)', error);
         }
+
+        // Initialize email queue worker
+        try {
+            initializeEmailQueue();
+            logger.info('Email queue initialized successfully');
+        } catch (error) {
+            logger.warn('Email queue initialization warning (non-critical)', error);
+        }
+
+        // Initialize email scheduler (BullMQ repeatable jobs)
+        initializeEmailScheduler().catch((error) => {
+            logger.warn('Email scheduler initialization warning (non-critical)', error);
+        });
 
         const server = createServer(app);
         initSocket(server);

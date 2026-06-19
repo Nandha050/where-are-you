@@ -6,9 +6,13 @@ import { Stop } from '../stop/stop.model';
 import { Notification } from './notification.model';
 import { User } from '../user/user.model';
 import { Bus } from '../bus/bus.model';
+import { Trip } from '../trip/trip.model';
+import { ACTIVE_TRIP_TERMINAL_STATUSES } from '../../constants/tripStatus';
+import { redisService } from '../../services/redis.service';
 import { sendPushNotification } from '../../utils/sendPushNotification';
 import { DeviceToken } from './deviceToken.model';
 import { logger } from '../../utils/logger';
+import { Route } from '../route/route.model';
 
 const toObjectId = (id: string) => new mongoose.Types.ObjectId(id);
 const NEAR_STOP_COOLDOWN_MS = 5 * 60 * 1000;
@@ -65,92 +69,196 @@ export const notificationService = {
 		latitude: number;
 		longitude: number;
 		isBusStartedEvent: boolean;
+		timestamp?: Date | string;
 	}) => {
-		logger.info(`[Notification] processBusLocationUpdate initiated: busId=${input.busId}, plate=${input.busNumberPlate}, lat=${input.latitude}, lng=${input.longitude}, isStart=${input.isBusStartedEvent}`);
+		logger.info(`[GPS POSITION] busId=${input.busId}, plate=${input.busNumberPlate}, lat=${input.latitude}, lng=${input.longitude}`);
 
-		// 1. Resolve implicit route-based subscriptions first
+		// 1. Stale Location Verification
+		if (input.timestamp) {
+			const pingTime = new Date(input.timestamp).getTime();
+			const now = Date.now();
+			const ageMs = now - pingTime;
+			if (ageMs > 2 * 60 * 1000) { // older than 2 minutes
+				logger.warn(`[Notification] Skipping stale location update for busId=${input.busId} — age is ${Math.round(ageMs / 1000)}s`);
+				return;
+			}
+		}
+
+		// 2. Fetch Active Trip & Route information
+		const activeTrip = await Trip.findOne({
+			busId: toObjectId(input.busId),
+			organizationId: toObjectId(input.organizationId),
+			status: { $nin: ['COMPLETED', 'CANCELLED'] },
+		}).select('_id routeId status');
+
+		if (!activeTrip) {
+			logger.warn(`[Notification] No active trip found for busId=${input.busId} — skipping notification processing`);
+			return;
+		}
+
+		const routeId = activeTrip.routeId;
+		const route = await Route.findById(routeId).select('name').lean();
+		const routeName = route?.name || 'Unknown Route';
+
+		// 3. Resolve implicit route-based subscriptions first
 		try {
-			const bus = await Bus.findOne({
-				_id: toObjectId(input.busId),
+			logger.info(`[Notification] Active trip found: ${activeTrip._id} on route: ${routeId}. Resolving implicit subscriptions...`);
+
+			const routeUsers = await User.find({
 				organizationId: toObjectId(input.organizationId),
-			}).select('routeId');
+				routeId: routeId,
+				stopId: { $exists: true, $ne: null },
+			}).select('_id name stopId');
 
-			if (bus && bus.routeId) {
-				logger.info(`[Notification] Bus ${input.busNumberPlate} route found: ${bus.routeId}. Resolving implicit subscriptions...`);
+			logger.info(`[Notification] Found ${routeUsers.length} route users assigned to route ${routeId}`);
 
-				const routeUsers = await User.find({
-					organizationId: toObjectId(input.organizationId),
-					routeId: bus.routeId,
-					stopId: { $exists: true, $ne: null },
-				}).select('_id name stopId');
+			// Bulk-fetch existing subscriptions for this bus to reduce O(U) queries
+			const existingSubs = await BusSubscription.find({
+				organizationId: toObjectId(input.organizationId),
+				busId: toObjectId(input.busId),
+			});
+			const subMap = new Map(existingSubs.map(s => [s.userId.toString(), s]));
 
-				logger.info(`[Notification] Found ${routeUsers.length} route users assigned to route ${bus.routeId}`);
+			for (const u of routeUsers) {
+				try {
+					const existingSub = subMap.get(u._id.toString());
 
-				for (const u of routeUsers) {
-					try {
-						const existingSub = await BusSubscription.findOne({
+					if (!existingSub) {
+						await BusSubscription.create({
 							organizationId: toObjectId(input.organizationId),
 							userId: u._id,
-							busId: bus._id,
+							busId: toObjectId(input.busId),
+							stopId: u.stopId,
+							notifyOnBusStart: true,
+							notifyOnNearStop: true,
+							nearRadiusMeters: 500, // Safe default threshold
+							isActive: true,
 						});
-
-						if (!existingSub) {
-							await BusSubscription.create({
-								organizationId: toObjectId(input.organizationId),
-								userId: u._id,
-								busId: bus._id,
-								stopId: u.stopId,
-								notifyOnBusStart: true,
-								notifyOnNearStop: true,
-								nearRadiusMeters: 500, // Safe default threshold
-								isActive: true,
-							});
-							logger.info(`[Notification] Created implicit BusSubscription for user ${u.name} (ID: ${u._id}) on route ${bus.routeId}`);
-						} else {
-							// Sync stopId if it has changed in user profile
-							let subUpdated = false;
-							if (!existingSub.isActive) {
-								existingSub.isActive = true;
-								subUpdated = true;
-							}
-							if (!existingSub.stopId || existingSub.stopId.toString() !== u.stopId?.toString()) {
-								existingSub.stopId = u.stopId;
-								subUpdated = true;
-							}
-							if (subUpdated) {
-								await existingSub.save();
-								logger.info(`[Notification] Synchronized BusSubscription settings for user ${u.name} (ID: ${u._id})`);
-							}
+						logger.info(`[Notification] Created implicit BusSubscription for user ${u.name} (ID: ${u._id}) on route ${routeId}`);
+					} else {
+						// Sync stopId if it has changed in user profile
+						let subUpdated = false;
+						if (!existingSub.isActive) {
+							existingSub.isActive = true;
+							subUpdated = true;
 						}
-					} catch (syncError) {
-						logger.error(`[Notification] Error syncing implicit subscription for user ${u.name} (ID: ${u._id}):`, syncError);
+						if (!existingSub.stopId || existingSub.stopId.toString() !== u.stopId?.toString()) {
+							existingSub.stopId = u.stopId;
+							subUpdated = true;
+						}
+						if (subUpdated) {
+							await existingSub.save();
+							logger.info(`[Notification] Synchronized BusSubscription settings for user ${u.name} (ID: ${u._id})`);
+						}
 					}
+				} catch (syncError) {
+					logger.error(`[Notification] Error syncing implicit subscription for user ${u.name} (ID: ${u._id}):`, syncError);
 				}
-			} else {
-				logger.warn(`[Notification] Bus ${input.busNumberPlate} has no assigned routeId`);
 			}
 		} catch (subError) {
 			logger.error('[Notification] Error resolving implicit route subscriptions:', subError);
 		}
 
-		// 2. Query all active subscriptions for this bus
+		// 4. Query stops on route to calculate progression
+		const stops = await Stop.find({
+			organizationId: toObjectId(input.organizationId),
+			routeId: routeId,
+		}).sort({ sequenceOrder: 1 }).select('_id name latitude longitude sequenceOrder radiusMeters');
+
+		if (stops.length === 0) {
+			logger.warn(`[Notification] No stops found on route ${routeId}`);
+			return;
+		}
+
+		// Calculate nearest stop to update last reached stop progression
+		let closestStop = stops[0];
+		let closestStopDist = Number.MAX_VALUE;
+		for (const stop of stops) {
+			const dist = calculateDistanceMeters(input.latitude, input.longitude, stop.latitude, stop.longitude);
+			if (dist < closestStopDist) {
+				closestStopDist = dist;
+				closestStop = stop;
+			}
+		}
+
+		// Fetch last reached stop sequence from Redis
+		const redis = redisService.getClient();
+		const redisSeqKey = `trip:${activeTrip._id}:last_reached_stop_sequence`;
+		const cachedSeqStr = await redis.get(redisSeqKey);
+		let lastReachedSeq = cachedSeqStr ? parseInt(cachedSeqStr, 10) : 0;
+
+		// Auto-advance sequence order based on proximity
+		lastReachedSeq = Math.max(lastReachedSeq, closestStop.sequenceOrder - 1);
+		if (closestStopDist <= 100) { // 100m is stop reached threshold
+			lastReachedSeq = Math.max(lastReachedSeq, closestStop.sequenceOrder);
+		}
+		await redis.setex(redisSeqKey, 86400, String(lastReachedSeq));
+
+		logger.info(`[ROUTE VALIDATION] tripId=${activeTrip._id}, routeId=${routeId}, closestStop=${closestStop.name}, sequenceOrder=${closestStop.sequenceOrder}, lastReachedSeq=${lastReachedSeq}`);
+
+		// Get previous bus location from Redis to calculate approaching vector
+		const redisLocationKey = `trip:${activeTrip._id}:last_location`;
+		const cachedLocStr = await redis.get(redisLocationKey);
+		let prevLat: number | null = null;
+		let prevLng: number | null = null;
+		if (cachedLocStr) {
+			try {
+				const parsed = JSON.parse(cachedLocStr);
+				prevLat = parsed.latitude;
+				prevLng = parsed.longitude;
+				logger.info(`[REDIS LOCATION] tripId=${activeTrip._id}, lastLat=${prevLat}, lastLng=${prevLng}`);
+			} catch (e) {
+				logger.warn('[Notification] Failed to parse cached location from Redis');
+			}
+		}
+
+		// Query all active subscriptions
 		const subscriptions = await BusSubscription.find({
 			organizationId: toObjectId(input.organizationId),
 			busId: toObjectId(input.busId),
 			isActive: true,
-		}).populate('stopId', 'name latitude longitude radiusMeters');
+		}).populate('stopId', 'name latitude longitude radiusMeters sequenceOrder');
 
 		logger.info(`[Notification] Found ${subscriptions.length} active subscriptions for busId=${input.busId}`);
 
 		if (subscriptions.length === 0) {
+			// Save current location as last location and exit
+			await redis.setex(redisLocationKey, 86400, JSON.stringify({ latitude: input.latitude, longitude: input.longitude, timestamp: new Date() }));
 			return;
 		}
 
+		// Perform bulk lookups to eliminate O(S) query overhead in the loop
+		const subscriberUserIds = subscriptions.map(s => s.userId);
+		
+		// 1. Bulk User details & notification preferences
+		const usersWithPrefs = await User.find({
+			_id: { $in: subscriberUserIds },
+			organizationId: toObjectId(input.organizationId),
+		})
+		.select('_id name stopId notificationPreferences')
+		.populate('stopId', 'name');
+		const userMap = new Map(usersWithPrefs.map(u => [u._id.toString(), u]));
+
+		// 2. Bulk User Device tokens
+		const allDeviceTokens = await DeviceToken.find({
+			userId: { $in: subscriberUserIds },
+			isActive: true,
+		}).select('userId deviceToken');
+		const tokenMap = new Map<string, string[]>();
+		for (const t of allDeviceTokens) {
+			const uid = t.userId.toString();
+			if (!tokenMap.has(uid)) {
+				tokenMap.set(uid, []);
+			}
+			tokenMap.get(uid)!.push(t.deviceToken);
+		}
+
+		// Evaluate and send notifications
 		for (const subscription of subscriptions) {
 			try {
 				let updatedSubscription = false;
 				const userId = subscription.userId.toString();
-				const deviceTokens = await notificationService.getUserDeviceTokens(userId);
+				const deviceTokens = tokenMap.get(userId) || [];
 
 				logger.info(`[Notification] Processing subscription for userId=${userId} — found ${deviceTokens.length} active device tokens`);
 
@@ -158,9 +266,19 @@ export const notificationService = {
 					continue;
 				}
 
-				// Load user notification preferences to validate
-				const userPrefs = await notificationService.getUserPreferences(userId);
-				logger.info(`[Notification] Preferences for user ${userId}: start=${userPrefs.tripStartedEnabled}, near=${userPrefs.busNearStopEnabled}, arrived=${userPrefs.busArrivedEnabled}`);
+				// Resolve user details & preferences
+				const userObj = userMap.get(userId);
+				const userName = userObj?.name || 'Passenger';
+				const userStopObj = userObj?.stopId as any;
+				const userStopName = userStopObj?.name || 'your stop';
+				const prefs = userObj?.notificationPreferences;
+				const userPrefs = {
+					tripStartedEnabled: prefs?.tripStartedEnabled ?? true,
+					busNearStopEnabled: prefs?.busNearStopEnabled ?? true,
+					busArrivedEnabled: prefs?.busArrivedEnabled ?? true,
+					delayAlertsEnabled: prefs?.delayAlertsEnabled ?? true,
+				};
+				logger.info(`[Notification] Preferences for user ${userId} (${userName}): start=${userPrefs.tripStartedEnabled}, near=${userPrefs.busNearStopEnabled}, arrived=${userPrefs.busArrivedEnabled}`);
 
 				// Bus Started Alert
 				if (input.isBusStartedEvent && subscription.notifyOnBusStart) {
@@ -168,8 +286,11 @@ export const notificationService = {
 						logger.info(`[Notification] User ${userId} has disabled trip start alerts. Skipping.`);
 					} else {
 						const title = 'Bus started';
-						const message = `Bus ${input.busNumberPlate} has started`;
-						const voiceMessage = `Bus ${input.busNumberPlate} has started.`;
+						const message = `Bus ${input.busNumberPlate} on Route ${routeName} has started.`;
+						const voiceMessage = `Dear ${userName}, your bus has started.`;
+
+						logger.info(`[USERNAME] ${userName}`);
+						logger.info(`[VOICE PAYLOAD GENERATED] voiceMessage="${voiceMessage}"`);
 
 						try {
 							logger.info(`[Notification] Creating BUS_STARTED DB record for user ${userId}`);
@@ -194,23 +315,27 @@ export const notificationService = {
 
 						for (const token of deviceTokens) {
 							try {
-								logger.info(`[Notification] Sending BUS_STARTED FCM to token: ${token.substring(0, 15)}...`);
-								await sendPushNotification({
+								const fcmPayload = {
 									fcmToken: token,
 									title,
 									body: message,
 									data: {
 										type: NOTIFICATION_TYPES.BUS_STARTED,
+										notificationType: NOTIFICATION_TYPES.BUS_STARTED,
 										busId: input.busId,
+										tripId: String(activeTrip._id),
 										numberPlate: input.busNumberPlate,
 										voiceMessage,
 									},
-								});
+								};
+								logger.info(`[FCM PAYLOAD] ${JSON.stringify(fcmPayload)}`);
+								await sendPushNotification(fcmPayload);
+								logger.info(`[FCM SENT] token=${token.substring(0, 15)}...`);
 							} catch (error: any) {
 								const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
 								const errorCode = error?.code || '';
 								logger.error(
-									`[Notification] Failed to send FCM push - userId: ${userId}, token: ${token}, type: ${NOTIFICATION_TYPES.BUS_STARTED}, errorCode: ${errorCode}, error: ${error instanceof Error ? error.message : String(error)}`
+									`[FCM FAILURE] token=${token.substring(0, 15)}..., errorCode=${errorCode}, error=${errorMessage}`
 								);
 								if (
 									errorCode === 'messaging/registration-token-not-registered' ||
@@ -249,43 +374,62 @@ export const notificationService = {
 							  ? stop.longitude
 							  : null;
 
-					const stopName = stop?.name || 'your location';
+					const stopName = stop?.name || userStopName || 'your location';
+					const stopSequence = typeof stop?.sequenceOrder === 'number' ? stop.sequenceOrder : 0;
 
 					if (targetLat !== null && targetLng !== null) {
-						const distance = calculateDistanceMeters(
+						const currentDistance = calculateDistanceMeters(
 							input.latitude,
 							input.longitude,
 							targetLat,
 							targetLng
 						);
 
-						// Enforce a minimum safe radius of 500m for near alerts
+						const previousDistance = (prevLat !== null && prevLng !== null)
+							? calculateDistanceMeters(prevLat, prevLng, targetLat, targetLng)
+							: null;
+
+						logger.info(`[DISTANCE CALCULATION] user=${userId}, stop=${stopName}, dist=${Math.round(currentDistance)}m, prevDist=${previousDistance !== null ? Math.round(previousDistance) + 'm' : 'none'}`);
+
+						// Enforce trigger distance rules: minimum 500m (configurable)
 						const radius = Math.max(
 							subscription.nearRadiusMeters || 0,
 							typeof stop?.radiusMeters === 'number' ? stop.radiusMeters : 0,
 							500
 						);
 
-						logger.info(`[Notification] Distance calculation: user/stop=${userId}/${stopName}, distance=${Math.round(distance)}m, radius=${radius}m`);
+						// Determine approaching vector direction
+						const isApproaching = previousDistance === null || currentDistance < previousDistance;
+						logger.info(`[APPROACHING STOP] user=${userId}, stop=${stopName}, approaching=${isApproaching}`);
 
-						const canNotifyNearStop =
-							!subscription.lastNearStopNotifiedAt ||
-							Date.now() - new Date(subscription.lastNearStopNotifiedAt).getTime() >=
-								NEAR_STOP_COOLDOWN_MS;
+						// Near Stop Alert Checks
+						if (currentDistance <= radius) {
+							const canNotifyNearStop =
+								!subscription.lastNearStopNotifiedAt ||
+								Date.now() - new Date(subscription.lastNearStopNotifiedAt).getTime() >=
+									NEAR_STOP_COOLDOWN_MS;
 
-						// Near Stop Alert
-						if (distance <= radius) {
 							if (!canNotifyNearStop) {
-								logger.info(`[Notification] BUS_NEAR_STOP cooldown active for user ${userId}. Skipping.`);
+								logger.info(`[COOLDOWN ACTIVE] user=${userId}, type=BUS_NEAR_STOP, lastNotifiedAt=${subscription.lastNearStopNotifiedAt}`);
 							} else if (!userPrefs.busNearStopEnabled) {
 								logger.info(`[Notification] User ${userId} has disabled near stop alerts. Skipping.`);
+							} else if (lastReachedSeq < stopSequence - 1) {
+								logger.info(`[Notification] Route progression blocked: bus has not reached previous stop for ${stopName} (sequence: ${stopSequence}, lastReachedSeq: ${lastReachedSeq})`);
+							} else if (lastReachedSeq >= stopSequence) {
+								logger.info(`[Notification] Route progression blocked: bus has already reached or passed ${stopName} (sequence: ${stopSequence}, lastReachedSeq: ${lastReachedSeq})`);
+							} else if (!isApproaching) {
+								logger.info(`[Notification] Direction validation blocked: bus is not approaching ${stopName}`);
 							} else {
 								const title = 'Bus is nearby';
 								const message = `Bus ${input.busNumberPlate} is near ${stopName}`;
-								const voiceMessage = `Your bus is approaching ${stopName}. Please be ready.`;
+								const voiceMessage = `Dear ${userName}, your bus is approaching ${stopName}. Please be ready.`;
+
+								logger.info(`[USERNAME] ${userName}`);
+								logger.info(`[STOP NAME] ${stopName}`);
+								logger.info(`[VOICE PAYLOAD GENERATED] voiceMessage="${voiceMessage}"`);
+								logger.info(`[BUS NEAR STOP TRIGGERED] user=${userId}, stop=${stopName}, distance=${Math.round(currentDistance)}m`);
 
 								try {
-									logger.info(`[Notification] Creating BUS_NEAR_STOP DB record for user ${userId}`);
 									await Notification.create({
 										organizationId: subscription.organizationId,
 										userId: subscription.userId,
@@ -302,7 +446,7 @@ export const notificationService = {
 											longitude: input.longitude,
 											targetLatitude: targetLat,
 											targetLongitude: targetLng,
-											distanceMeters: Math.round(distance),
+											distanceMeters: Math.round(currentDistance),
 											radiusMeters: radius,
 										},
 									});
@@ -312,25 +456,29 @@ export const notificationService = {
 
 								for (const token of deviceTokens) {
 									try {
-										logger.info(`[Notification] Sending BUS_NEAR_STOP FCM to token: ${token.substring(0, 15)}...`);
-										await sendPushNotification({
+										const fcmPayload = {
 											fcmToken: token,
 											title,
 											body: message,
 											data: {
 												type: NOTIFICATION_TYPES.BUS_NEAR_STOP,
+												notificationType: NOTIFICATION_TYPES.BUS_NEAR_STOP,
 												busId: input.busId,
+												tripId: String(activeTrip._id),
 												numberPlate: input.busNumberPlate,
 												stopName,
-												distanceMeters: String(Math.round(distance)),
+												distanceMeters: String(Math.round(currentDistance)),
 												voiceMessage,
 											},
-										});
+										};
+										logger.info(`[FCM PAYLOAD] ${JSON.stringify(fcmPayload)}`);
+										await sendPushNotification(fcmPayload);
+										logger.info(`[FCM SENT] token=${token.substring(0, 15)}...`);
 									} catch (error: any) {
 										const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
 										const errorCode = error?.code || '';
 										logger.error(
-											`[Notification] Failed to send FCM push - userId: ${userId}, token: ${token}, type: ${NOTIFICATION_TYPES.BUS_NEAR_STOP}, errorCode: ${errorCode}, error: ${error instanceof Error ? error.message : String(error)}`
+											`[FCM FAILURE] token=${token.substring(0, 15)}..., errorCode=${errorCode}, error=${errorMessage}`
 										);
 										if (
 											errorCode === 'messaging/registration-token-not-registered' ||
@@ -352,24 +500,29 @@ export const notificationService = {
 							}
 						}
 
-						// Bus Arrived Alert
-						if (distance <= ARRIVED_THRESHOLD_M) {
+						// Bus Arrived Alert Checks (100m threshold)
+						if (currentDistance <= ARRIVED_THRESHOLD_M) {
 							const canNotifyArrived =
 								!subscription.lastArrivedNotifiedAt ||
 								Date.now() - new Date(subscription.lastArrivedNotifiedAt).getTime() >=
 									ARRIVED_COOLDOWN_MS;
 
 							if (!canNotifyArrived) {
-								logger.info(`[Notification] BUS_ARRIVED cooldown active for user ${userId}. Skipping.`);
+								logger.info(`[COOLDOWN ACTIVE] user=${userId}, type=BUS_ARRIVED, lastNotifiedAt=${subscription.lastArrivedNotifiedAt}`);
 							} else if (!userPrefs.busArrivedEnabled) {
 								logger.info(`[Notification] User ${userId} has disabled arrived alerts. Skipping.`);
-							} else {
+							} else if (lastReachedSeq < stopSequence) {
+								logger.info(`[BUS ARRIVED TRIGGERED] user=${userId}, stop=${stopName}`);
+
 								const arrivedTitle = 'Bus Arrived';
 								const arrivedMessage = `Bus ${input.busNumberPlate} has arrived at ${stopName}`;
-								const voiceMessage = `Your bus has arrived at ${stopName}.`;
+								const voiceMessage = `Dear ${userName}, your bus has arrived at ${stopName}.`;
+
+								logger.info(`[USERNAME] ${userName}`);
+								logger.info(`[STOP NAME] ${stopName}`);
+								logger.info(`[VOICE PAYLOAD GENERATED] voiceMessage="${voiceMessage}"`);
 
 								try {
-									logger.info(`[Notification] Creating BUS_ARRIVED DB record for user ${userId}`);
 									await Notification.create({
 										organizationId: subscription.organizationId,
 										userId: subscription.userId,
@@ -393,24 +546,28 @@ export const notificationService = {
 
 								for (const token of deviceTokens) {
 									try {
-										logger.info(`[Notification] Sending BUS_ARRIVED FCM to token: ${token.substring(0, 15)}...`);
-										await sendPushNotification({
+										const fcmPayload = {
 											fcmToken: token,
 											title: arrivedTitle,
 											body: arrivedMessage,
 											data: {
 												type: NOTIFICATION_TYPES.BUS_ARRIVED,
+												notificationType: NOTIFICATION_TYPES.BUS_ARRIVED,
 												busId: input.busId,
+												tripId: String(activeTrip._id),
 												numberPlate: input.busNumberPlate,
 												stopName,
 												voiceMessage,
 											},
-										});
+										};
+										logger.info(`[FCM PAYLOAD] ${JSON.stringify(fcmPayload)}`);
+										await sendPushNotification(fcmPayload);
+										logger.info(`[FCM SENT] token=${token.substring(0, 15)}...`);
 									} catch (error: any) {
 										const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
 										const errorCode = error?.code || '';
 										logger.error(
-											`[Notification] Failed to send FCM push - userId: ${userId}, token: ${token}, type: ${NOTIFICATION_TYPES.BUS_ARRIVED}, errorCode: ${errorCode}, error: ${error instanceof Error ? error.message : String(error)}`
+											`[FCM FAILURE] token=${token.substring(0, 15)}..., errorCode=${errorCode}, error=${errorMessage}`
 										);
 										if (
 											errorCode === 'messaging/registration-token-not-registered' ||
@@ -443,6 +600,9 @@ export const notificationService = {
 				logger.error(`[Notification] Error processing subscription in loop:`, subError);
 			}
 		}
+
+		// Save current location as last location for the next update
+		await redis.setex(redisLocationKey, 86400, JSON.stringify({ latitude: input.latitude, longitude: input.longitude, timestamp: new Date() }));
 	},
 
 	// FCM Device Token Management
@@ -507,96 +667,6 @@ export const notificationService = {
 		} catch (error) {
 			logger.error('Error fetching device tokens:', error);
 			return [];
-		}
-	},
-
-	sendPushToUserDevices: async (
-		userId: string,
-		title: string,
-		body: string,
-		data: Record<string, string> = {}
-	) => {
-		try {
-			const deviceTokens = await notificationService.getUserDeviceTokens(userId);
-			if (deviceTokens.length === 0) {
-				logger.warn(`No active device tokens found for user: ${userId}`);
-				return;
-			}
-			for (const token of deviceTokens) {
-				await sendPushNotification({
-					fcmToken: token,
-					title,
-					body,
-					data,
-				});
-			}
-		} catch (error) {
-			logger.error(`Error sending push to user devices (userId=${userId}):`, error);
-		}
-	},
-
-	// Send Notification via FCM with Deduplication
-	sendFCMNotification: async (input: {
-		organizationId: string;
-		userId: string;
-		busId: string;
-		tripId: string;
-		type: string;
-		title: string;
-		body: string;
-		voiceMessage: string;
-		isSticky?: boolean;
-		noSound?: boolean;
-	}) => {
-		try {
-			// Get device tokens
-			const deviceTokens = await notificationService.getUserDeviceTokens(input.userId);
-
-			if (deviceTokens.length === 0) {
-				logger.warn(`No device tokens found for user: ${input.userId}`);
-				return { success: false, error: 'No device tokens' };
-			}
-
-			let successCount = 0;
-			let failureCount = 0;
-
-			for (const token of deviceTokens) {
-				try {
-					await sendPushNotification({
-						fcmToken: token,
-						title: input.title,
-						body: input.body,
-						data: {
-							notificationType: input.type,
-							tripId: input.tripId || '',
-							busId: input.busId || '',
-							voiceMessage: input.voiceMessage || '',
-							isSticky: String(input.isSticky || false),
-							noSound: String(input.noSound || false),
-						},
-					});
-					successCount++;
-				} catch (error) {
-					failureCount++;
-					logger.error(`FCM send failed for token ${token.substring(0, 15)}...:`, error);
-
-					if (error instanceof Error && error.message.includes('invalid registration id')) {
-						await notificationService.deactivateDeviceToken(token);
-					}
-				}
-			}
-
-			return {
-				success: successCount > 0,
-				successCount,
-				failureCount,
-			};
-		} catch (error) {
-			logger.error('Error in sendFCMNotification:', error);
-			return {
-				success: false,
-				error: error instanceof Error ? error.message : 'Unknown error',
-			};
 		}
 	},
 
@@ -689,14 +759,16 @@ export const notificationService = {
 				return;
 			}
 
+			const route = await Route.findById(input.routeId).select('name').lean();
+			const routeName = route?.name || 'Unknown Route';
+
 			const users = await User.find({
 				_id: { $in: uniqueUserIds.map(toObjectId) },
 				organizationId: toObjectId(input.organizationId),
-			}).select('_id name notificationPreferences');
+			})
+			.select('_id name stopId notificationPreferences')
+			.populate('stopId', 'name');
 
-			const title = 'Trip Started';
-			const message = `Bus ${input.busNumberPlate} has started its trip. Track it live!`;
-			const voiceMessage = `Bus ${input.busNumberPlate} has started its trip.`;
 			let notifiedCount = 0;
 
 			for (const user of users) {
@@ -709,6 +781,20 @@ export const notificationService = {
 						logger.info(`[Notification] User ${user.name} (ID: ${userId}) has disabled trip start alerts. Skipping.`);
 						continue;
 					}
+
+					const userName = user.name || 'Passenger';
+					const userStopObj = user.stopId as any;
+					const stopName = userStopObj?.name || '';
+
+					const voiceMessage = `Dear ${userName}, your bus has started.`;
+					const title = 'Trip Started';
+					const message = `Bus ${input.busNumberPlate} on Route ${routeName} has started its trip. Track it live!`;
+
+					logger.info(`[USERNAME] ${userName}`);
+					if (stopName) {
+						logger.info(`[STOP NAME] ${stopName}`);
+					}
+					logger.info(`[VOICE PAYLOAD GENERATED] voiceMessage="${voiceMessage}"`);
 
 					try {
 						logger.info(`[Notification] Creating TRIP_STARTED DB record for user ${user.name} (ID: ${userId})`);
@@ -737,19 +823,22 @@ export const notificationService = {
 
 					for (const token of deviceTokens) {
 						try {
-							logger.info(`[Notification] Sending TRIP_STARTED FCM to token: ${token.substring(0, 15)}...`);
-							await sendPushNotification({
+							const fcmPayload = {
 								fcmToken: token,
 								title,
 								body: message,
 								data: {
 									type: NOTIFICATION_TYPES.TRIP_STARTED,
+									notificationType: NOTIFICATION_TYPES.TRIP_STARTED,
 									busId: input.busId,
 									numberPlate: input.busNumberPlate,
 									tripId: input.tripId,
 									voiceMessage,
 								},
-							});
+							};
+							logger.info(`[FCM PAYLOAD] ${JSON.stringify(fcmPayload)}`);
+							await sendPushNotification(fcmPayload);
+							logger.info(`[FCM SENT] token=${token.substring(0, 15)}...`);
 						} catch (error: any) {
 							const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
 							const errorCode = error?.code || '';
@@ -823,19 +912,35 @@ export const notificationService = {
 				return;
 			}
 
+			const route = await Route.findById(input.routeId).select('name').lean();
+			const routeName = route?.name || 'Unknown Route';
+
 			const users = await User.find({
 				_id: { $in: uniqueUserIds.map(toObjectId) },
 				organizationId: toObjectId(input.organizationId),
-			}).select('_id name notificationPreferences');
+			})
+			.select('_id name stopId notificationPreferences')
+			.populate('stopId', 'name');
 
-			const title = 'Trip Completed';
-			const message = `Bus ${input.busNumberPlate} has completed its trip.`;
-			const voiceMessage = `Bus ${input.busNumberPlate} has completed its trip.`;
 			let notifiedCount = 0;
 
 			for (const user of users) {
 				try {
 					const userId = user._id.toString();
+
+					const userName = user.name || 'Passenger';
+					const userStopObj = user.stopId as any;
+					const stopName = userStopObj?.name || '';
+
+					const voiceMessage = `Dear ${userName}, your trip has been completed.`;
+					const title = 'Trip Completed';
+					const message = `Bus ${input.busNumberPlate} on Route ${routeName} has completed its trip.`;
+
+					logger.info(`[USERNAME] ${userName}`);
+					if (stopName) {
+						logger.info(`[STOP NAME] ${stopName}`);
+					}
+					logger.info(`[VOICE PAYLOAD GENERATED] voiceMessage="${voiceMessage}"`);
 
 					try {
 						logger.info(`[Notification] Creating TRIP_COMPLETED DB record for user ${user.name} (ID: ${userId})`);
@@ -864,19 +969,22 @@ export const notificationService = {
 
 					for (const token of deviceTokens) {
 						try {
-							logger.info(`[Notification] Sending TRIP_COMPLETED FCM to token: ${token.substring(0, 15)}...`);
-							await sendPushNotification({
+							const fcmPayload = {
 								fcmToken: token,
 								title,
 								body: message,
 								data: {
 									type: NOTIFICATION_TYPES.TRIP_COMPLETED,
+									notificationType: NOTIFICATION_TYPES.TRIP_COMPLETED,
 									busId: input.busId,
 									numberPlate: input.busNumberPlate,
 									tripId: input.tripId,
 									voiceMessage,
 								},
-							});
+							};
+							logger.info(`[FCM PAYLOAD] ${JSON.stringify(fcmPayload)}`);
+							await sendPushNotification(fcmPayload);
+							logger.info(`[FCM SENT] token=${token.substring(0, 15)}...`);
 						} catch (error: any) {
 							const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
 							const errorCode = error?.code || '';
@@ -952,14 +1060,16 @@ export const notificationService = {
 				return;
 			}
 
+			const route = await Route.findById(input.routeId).select('name').lean();
+			const routeName = route?.name || 'Unknown Route';
+
 			const users = await User.find({
 				_id: { $in: uniqueUserIds.map(toObjectId) },
 				organizationId: toObjectId(input.organizationId),
-			}).select('_id name notificationPreferences');
+			})
+			.select('_id name stopId notificationPreferences')
+			.populate('stopId', 'name');
 
-			const title = 'Bus Delayed';
-			const message = `Bus ${input.busNumberPlate} is delayed by ~${input.delayMinutes} minutes.${input.reason ? ' ' + input.reason : ''}`;
-			const voiceMessage = `Bus ${input.busNumberPlate} is delayed by ${input.delayMinutes} minutes.`;
 			let notifiedCount = 0;
 
 			for (const user of users) {
@@ -970,6 +1080,20 @@ export const notificationService = {
 						logger.info(`[Notification] User ${user.name} (ID: ${userId}) has disabled delay alerts. Skipping.`);
 						continue;
 					}
+
+					const userName = user.name || 'Passenger';
+					const userStopObj = user.stopId as any;
+					const stopName = userStopObj?.name || '';
+
+					const voiceMessage = `Dear ${userName}, your bus is delayed by ${input.delayMinutes} minutes.`;
+					const title = 'Bus Delayed';
+					const message = `Bus ${input.busNumberPlate} on Route ${routeName} is delayed by ~${input.delayMinutes} minutes.${input.reason ? ' ' + input.reason : ''}`;
+
+					logger.info(`[USERNAME] ${userName}`);
+					if (stopName) {
+						logger.info(`[STOP NAME] ${stopName}`);
+					}
+					logger.info(`[VOICE PAYLOAD GENERATED] voiceMessage="${voiceMessage}"`);
 
 					try {
 						logger.info(`[Notification] Creating DELAY_ALERT DB record for user ${user.name} (ID: ${userId})`);
@@ -998,19 +1122,23 @@ export const notificationService = {
 
 					for (const token of deviceTokens) {
 						try {
-							logger.info(`[Notification] Sending DELAY_ALERT FCM to token: ${token.substring(0, 15)}...`);
-							await sendPushNotification({
+							const fcmPayload = {
 								fcmToken: token,
 								title,
 								body: message,
 								data: {
 									type: NOTIFICATION_TYPES.DELAY_ALERT,
+									notificationType: NOTIFICATION_TYPES.DELAY_ALERT,
 									busId: input.busId,
 									numberPlate: input.busNumberPlate,
+									tripId: input.tripId,
 									delayMinutes: String(input.delayMinutes),
 									voiceMessage,
 								},
-							});
+							};
+							logger.info(`[FCM PAYLOAD] ${JSON.stringify(fcmPayload)}`);
+							await sendPushNotification(fcmPayload);
+							logger.info(`[FCM SENT] token=${token.substring(0, 15)}...`);
 						} catch (error: any) {
 							const errorMessage = error instanceof Error ? error.message.toLowerCase() : '';
 							const errorCode = error?.code || '';
